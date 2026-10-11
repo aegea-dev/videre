@@ -62,3 +62,41 @@ fn a_clockwise_turn_renders_a_quarter_turn_clockwise() {
     assert!(ccw.width() > ccw.height());
     assert_eq!(marker_corner(&ccw), (false, false));
 }
+
+#[test]
+fn a_heic_without_irot_renders_turned_once_one_is_added() {
+    let dir = tempfile::tempdir().unwrap();
+    let original = std::fs::read(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/heic/grid_no_irot.heic"
+    ))
+    .unwrap();
+    let before = render(&original, dir.path(), "irotsuz.heic");
+    // No irot: QuickLook shows it as stored, ignoring the EXIF tag of 6.
+    assert!(before.width() > before.height());
+    assert_eq!(marker_corner(&before), (false, false));
+
+    // Counter-clockwise: portrait, the top-left marker now bottom-left.
+    let ccw = videre::heif_rotate::rotated(&original, true).unwrap();
+    let after = render(&ccw, dir.path(), "ccw.heic");
+    assert!(after.height() > after.width());
+    assert_eq!(marker_corner(&after), (false, true));
+
+    // Clockwise: portrait, the marker top-right.
+    let cw = videre::heif_rotate::rotated(&original, false).unwrap();
+    let after = render(&cw, dir.path(), "cw.heic");
+    assert!(after.height() > after.width());
+    assert_eq!(marker_corner(&after), (true, false));
+
+    // ImageIO, which Photos and Preview use, opens the rewritten file. (sips
+    // reports no orientation for any HEIC, so the EXIF value is checked by
+    // the unit tests instead.)
+    let out = std::process::Command::new("sips")
+        .args(["-g", "pixelWidth"])
+        .arg(dir.path().join("ccw.heic"))
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success(), "{text}");
+    assert!(text.contains("pixelWidth: 2048"), "{text}");
+}
