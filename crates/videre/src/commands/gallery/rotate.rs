@@ -98,12 +98,8 @@ pub fn next_orientation_ccw(current: u16) -> u16 {
 /// that maps a point to the new canvas needs this canvas's height. Returns `None`
 /// if the dimensions cannot be read.
 pub fn current_display_dimensions(path: &Path) -> Option<(u32, u32)> {
-    let (w, h) = image::image_dimensions(path).ok()?;
-    if matches!(current_orientation(path), 5..=8) {
-        Some((h, w))
-    } else {
-        Some((w, h))
-    }
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+    videre::display_size::of_path(path, None, ext)
 }
 
 /// Rotate an `"x,y,w,h"` bbox string (integers, as `videre faces` writes them)

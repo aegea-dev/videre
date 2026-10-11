@@ -2300,6 +2300,17 @@ fn a_heic_rotates_by_irot_and_its_faces_turn_with_it() {
         })
         .unwrap();
     assert_eq!(bbox, "1448,100,400,300");
+    // The stored size is the displayed size, so it turns with the photo.
+    let size = |hash: &str| -> (i64, i64) {
+        lib.conn()
+            .query_row(
+                "SELECT width, height FROM file_hashes WHERE hash = ?1",
+                [hash],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap()
+    };
+    assert_eq!(size(&portrait), (2048, 1536));
 
     // A HEIC with no irot is given one: counter-clockwise from as stored is
     // an irot of 90, which EXIF calls 8.
@@ -2309,6 +2320,7 @@ fn a_heic_rotates_by_irot_and_its_faces_turn_with_it() {
     let plain_after = std::fs::read(lib.root.join("irotsuz.heic")).unwrap();
     assert!(plain_after.len() > plain_before.len(), "an irot was added");
     assert_eq!(videre::heif_rotate::read(&plain_after).unwrap().angle, 1);
+    assert_eq!(size(&plain), (1536, 2048));
 
     // A rescan finds the same photo: the content key survived the turn.
     drop(server);

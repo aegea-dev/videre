@@ -104,6 +104,12 @@ fn run_inner(args: &ScanArgs, ctx: &CommandContext) -> anyhow::Result<ScanJson> 
             if resolved > 0 && !args.silent {
                 tracing::info!("Resolved the capture date of {resolved} existing file(s)");
             }
+            // Rows stored before sizes were the displayed size are turned
+            // from their headers; nothing is hashed again.
+            let oriented = sqlite_output::orient_unoriented(&conn)?;
+            if oriented > 0 && !args.silent {
+                tracing::info!("Corrected the stored size of {oriented} existing file(s)");
+            }
             let precedence = args.xmp.resolve_from(&ctx.library.settings)?;
             // Reconcile XMP incrementally: files this run hashed get a full
             // reconcile, files whose sidecar changed get a sidecar-only read,

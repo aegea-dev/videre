@@ -1,5 +1,6 @@
 mod bmff;
 pub mod content_key;
+pub mod display_size;
 pub mod duplicates;
 pub mod hasher;
 pub mod heif_rotate;

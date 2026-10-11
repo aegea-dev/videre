@@ -44,7 +44,7 @@ use std::time::Duration;
 /// different face after pruning. Version 5 adds the resolved capture date
 /// (`capture_date`, `date_source`) and where a row's GPS came from
 /// (`gps_source`), in place.
-const SCHEMA_VERSION: i64 = 5;
+const SCHEMA_VERSION: i64 = 6;
 
 /// How long every open waits for a concurrent writer before failing, so two
 /// videre processes on one library surface as a bounded error rather than
@@ -88,6 +88,10 @@ const FILE_HASHES_COLUMNS: &[(&str, &str)] = &[
     // 'exif' or 'sidecar' (a Google Takeout sidecar's geoData); NULL with no
     // GPS.
     ("gps_source", "TEXT"),
+    // 1 once width and height are the displayed size, turned by the file's
+    // rotation mark (`videre::display_size`). NULL = stored before that, put
+    // right by the next scan from the file's header, without rehashing.
+    ("dims_oriented", "INTEGER"),
 ];
 
 /// The complete current `faces` schema, verified after preparation.
@@ -440,6 +444,32 @@ fn upgrade_v4_to_v5(conn: &Connection) -> Result<()> {
     }
 }
 
+/// Add `dims_oriented`. Additive: every row stays, with the column NULL,
+/// which the next scan settles by turning the stored size from the file's
+/// header, without rehashing (`videre::sqlite_output::orient_unoriented`).
+fn upgrade_v5_to_v6(conn: &Connection) -> Result<()> {
+    conn.execute_batch("BEGIN IMMEDIATE")?;
+    let result = (|| -> Result<()> {
+        anyhow::ensure!(
+            user_version(conn)? == 5,
+            "expected schema 5 for the displayed-size upgrade"
+        );
+        add_missing_columns(conn, "file_hashes", FILE_HASHES_COLUMNS)?;
+        conn.pragma_update(None, "user_version", 6)?;
+        Ok(())
+    })();
+    match result {
+        Ok(()) => {
+            conn.execute_batch("COMMIT")?;
+            Ok(())
+        }
+        Err(e) => {
+            let _ = conn.execute_batch("ROLLBACK");
+            Err(e)
+        }
+    }
+}
+
 /// Every in-place upgrade from `version` to the current schema, in order.
 fn upgrade_from(conn: &Connection) -> Result<()> {
     if user_version(conn)? == 3 {
@@ -447,6 +477,9 @@ fn upgrade_from(conn: &Connection) -> Result<()> {
     }
     if user_version(conn)? == 4 {
         upgrade_v4_to_v5(conn)?;
+    }
+    if user_version(conn)? == 5 {
+        upgrade_v5_to_v6(conn)?;
     }
     Ok(())
 }
@@ -1140,8 +1173,16 @@ mod tests {
         );
     }
 
+    /// A schema 5 library: the column schema 6 added is dropped again.
+    fn make_v5(conn: &Connection) {
+        conn.execute_batch("ALTER TABLE file_hashes DROP COLUMN dims_oriented;")
+            .unwrap();
+        conn.pragma_update(None, "user_version", 5).unwrap();
+    }
+
     /// A schema 4 library: the date columns schema 5 added are dropped again.
     fn make_v4(conn: &Connection) {
+        make_v5(conn);
         conn.execute_batch(
             "DROP INDEX IF EXISTS idx_file_hashes_capture_date;
              ALTER TABLE file_hashes DROP COLUMN capture_date;
@@ -1150,6 +1191,34 @@ mod tests {
         )
         .unwrap();
         conn.pragma_update(None, "user_version", 4).unwrap();
+    }
+
+    /// Schema 6 marks whether the stored size is the displayed size, in
+    /// place: a schema 5 library opens with every row kept and the marker
+    /// empty, for the next scan to settle.
+    #[test]
+    fn v5_upgrade_adds_the_size_marker_and_keeps_every_row() {
+        let (_temp, ctx) = library();
+        let conn = initialize(&ctx).unwrap();
+        make_v5(&conn);
+        let path = ctx.paths.root.join("Fotoğraflar/çiçek.heic");
+        conn.execute(
+            "INSERT INTO file_hashes(path,hash,width,height) VALUES(?1,'hçiçek',4032,3024)",
+            [path.to_string_lossy()],
+        )
+        .unwrap();
+        drop(conn);
+
+        let conn = open_existing(&ctx).unwrap();
+        assert_eq!(user_version(&conn).unwrap(), SCHEMA_VERSION);
+        let row: (String, i64, Option<i64>) = conn
+            .query_row(
+                "SELECT hash, width, dims_oriented FROM file_hashes",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(row, ("hçiçek".to_string(), 4032, None));
     }
 
     /// Schema 5 adds the resolved capture date in place: rows, hashes and

@@ -39,6 +39,23 @@ pub fn decode_oriented_bytes(bytes: &[u8]) -> Option<image::DynamicImage> {
     Some(apply(img, orientation))
 }
 
+/// The size an image is shown at: its header's size, turned when its EXIF
+/// Orientation is a quarter turn. Reads the header only, not the pixels.
+pub fn displayed_size_reader<R: std::io::BufRead + std::io::Seek>(reader: R) -> Option<(u32, u32)> {
+    use image::metadata::Orientation::*;
+    let mut decoder = image::ImageReader::new(reader)
+        .with_guessed_format()
+        .ok()?
+        .into_decoder()
+        .ok()?;
+    let (w, h) = decoder.dimensions();
+    let quarter = matches!(
+        decoder.orientation().unwrap_or(NoTransforms),
+        Rotate90 | Rotate270 | Rotate90FlipH | Rotate270FlipH
+    );
+    Some(if quarter { (h, w) } else { (w, h) })
+}
+
 pub fn decode_raw_with_orientation(
     path: &Path,
 ) -> image::ImageResult<(image::DynamicImage, image::metadata::Orientation)> {
