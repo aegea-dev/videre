@@ -416,7 +416,8 @@ counts resized candidates not compared yet, which only the MCP tool leaves
 
 `review` writes the chosen groups to a browsable file, with thumbnails and the
 group structure, so you can review them away from the terminal or keep the
-list after the run.
+list after the run. It names the people in each file but carries no face
+pictures, so even thousands of `similar` groups are written quickly.
 
 ```bash
 videre dedupe review                         # writes <db>_duplicates.html

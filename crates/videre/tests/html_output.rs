@@ -225,3 +225,41 @@ fn both_static_pages_are_in_help() {
         );
     }
 }
+
+/// A review page lists what to compare, not who is in it: cutting a face
+/// picture out of a file means decoding the whole original, and a page of
+/// thousands of similar groups did that for every named face off an external
+/// drive, so it ran for hours with nothing to show. The page names the people
+/// and embeds no face picture.
+#[test]
+fn dedupe_review_names_people_without_cutting_out_their_faces() {
+    let lib = TestLibrary::new();
+    lib.copy_fixture("ai-generated-couple.jpg", "çiçek.jpg");
+    lib.copy_fixture("ai-generated-couple.jpg", "çiçek kopya.jpg");
+    lib.scan();
+    let conn = lib.conn();
+    let hash: String = conn
+        .query_row("SELECT hash FROM file_hashes LIMIT 1", [], |r| r.get(0))
+        .unwrap();
+    conn.execute_batch(
+        "INSERT INTO people (name, full_name) VALUES ('ayse_demirtas', 'Ayşe Demirtaş');",
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO faces (hash, bbox, embedding, person_label, confirmed)
+         VALUES (?1, '100,100,200,200', X'0000', 'ayse_demirtas', 1)",
+        [&hash],
+    )
+    .unwrap();
+    drop(conn);
+
+    let html = run_dedupe_html(&lib);
+    assert!(
+        html.contains(r#""faces":[{"name":"Ayşe Demirtaş"}]"#),
+        "the person is named, and nothing else is carried for the face"
+    );
+    assert!(
+        !html.contains(r#"{"thumb":"#),
+        "no face picture is cut out and embedded"
+    );
+}

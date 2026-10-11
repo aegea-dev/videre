@@ -438,12 +438,14 @@ function renderMetaPanel(meta){
   let html = '<div class="lb-info">'+likeBtn+rows.join('')+'</div>';
   if(hasPeople){
     // A live page carries `id` and fetches the crop from the endpoint on open;
-    // a static export carries `thumb` as a data URI. One renderer serves both.
+    // a static export carries `thumb` as a data URI; a review page carries the
+    // name alone. One renderer serves all three.
     const people = meta.faces.map(fc => {
-      const src = fc.thumb ? escA(fc.thumb) : '/api/faces/'+encodeURIComponent(fc.id)+'/image';
+      const src = fc.thumb ? escA(fc.thumb)
+        : fc.id != null ? '/api/faces/'+encodeURIComponent(fc.id)+'/image' : null;
       // The whole card links to the person, so the photo is clickable too.
       return '<a class="lb-face" href="'+peopleRootG()+'person/'+encodeURIComponent(fc.name)+'?from=lightbox">'+
-        '<img src="'+src+'" loading="lazy"><span>'+escH(fc.name)+'</span></a>';
+        (src ? '<img src="'+src+'" loading="lazy">' : '')+'<span>'+escH(fc.name)+'</span></a>';
     }).join('');
     html += '<div class="lb-people">'+people+'</div>';
   }
