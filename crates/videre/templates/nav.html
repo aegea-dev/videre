@@ -153,12 +153,12 @@
 <button type="button" class="secnav-processing-btn" id="secnav-processing-btn" aria-expanded="false" aria-controls="secnav-processing-list"></button>
 <ul class="secnav-processing-list" id="secnav-processing-list" hidden></ul>
 </div>
-<form class="secnav-search" action="/" method="get" role="search">
+{% if current.has_search() %}<form class="secnav-search" action="/" method="get" role="search">
 <div class="qbox" id="qbox"><input type="search" name="q" id="nav-search" placeholder="Search or filter&hellip;" aria-label="Search or filter photos" autocomplete="off"></div>
 <button type="button" class="qbox-caret" id="qbox-caret" aria-haspopup="true" aria-expanded="false" aria-controls="qbox-options">Filter &#9662;</button>
 <ul class="qbox-suggest" id="qbox-suggest" role="listbox" aria-label="Suggestions" hidden></ul>
 <div class="qbox-options" id="qbox-options" role="dialog" aria-label="Filter options" hidden></div>
-</form>
+</form>{% endif %}
 <div class="secnav-menu">
 <button type="button" id="secnav-more" class="secnav-more" aria-label="More" aria-haspopup="menu" aria-expanded="false" aria-controls="secnav-menu-list">&#8943;</button>
 <div id="secnav-menu-list" class="secnav-menu-list" role="menu" hidden>
