@@ -380,3 +380,77 @@ fn scan_announces_the_metadata_phase_after_hashing() {
         "expected a metadata-phase message so the user knows to wait; got: {stderr}"
     );
 }
+
+/// The stored size of each scanned file, by file name.
+fn sizes(library: &TestLibrary) -> std::collections::BTreeMap<String, (i64, i64)> {
+    let conn = library.conn();
+    let mut stmt = conn
+        .prepare("SELECT path, width, height FROM file_hashes")
+        .unwrap();
+    stmt.query_map([], |r| {
+        let path: String = r.get(0)?;
+        let name = std::path::Path::new(&path)
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        Ok((name, (r.get(1)?, r.get(2)?)))
+    })
+    .unwrap()
+    .collect::<rusqlite::Result<_>>()
+    .unwrap()
+}
+
+/// A phone stores a portrait shot landscape and marks it to be shown turned,
+/// so the size a person sees, which the gallery lays tiles out by and face
+/// regions are measured against, is the stored size turned by that mark.
+#[test]
+fn scan_stores_the_size_each_file_is_shown_at() {
+    let library = TestLibrary::new();
+    library.copy_fixture("heic/grid_rot90.heic", "portre.heic");
+    library.copy_fixture("ai-generated-couple_o6.jpg", "çiçek_o6.jpg");
+    library.copy_fixture("ai-generated-couple.jpg", "çiçek.jpg");
+    library.copy_fixture("testsrc_64x32_rot90.mp4", "dikey.mp4");
+    assert!(scan(&library, &["--silent"]).status.success());
+    let sizes = sizes(&library);
+    // Stored 2048x1536 with an irot of 270.
+    assert_eq!(sizes["portre.heic"], (1536, 2048));
+    // Stored 1200x1543 with EXIF Orientation 6.
+    assert_eq!(sizes["çiçek_o6.jpg"], (1543, 1200));
+    assert_eq!(sizes["çiçek.jpg"], (1200, 1543), "no mark, no turn");
+    // Stored 64x32 with a 90-degree display matrix.
+    assert_eq!(sizes["dikey.mp4"], (32, 64));
+}
+
+/// Rows a scan stored before it applied the turn are corrected by the next
+/// scan, from the files' headers, without rehashing them.
+#[test]
+fn a_scan_corrects_sizes_stored_before_the_turn_was_applied() {
+    let library = TestLibrary::new();
+    library.copy_fixture("heic/grid_rot90.heic", "portre.heic");
+    library.copy_fixture("testsrc_64x32_rot90.mp4", "dikey.mp4");
+    assert!(scan(&library, &["--silent"]).status.success());
+    // As an older version stored them.
+    library
+        .conn()
+        .execute_batch(
+            "UPDATE file_hashes SET width = 2048, height = 1536, dims_oriented = NULL
+               WHERE path LIKE '%portre.heic';
+             UPDATE file_hashes SET width = 64, height = 32, dims_oriented = NULL
+               WHERE path LIKE '%dikey.mp4';",
+        )
+        .unwrap();
+    assert!(scan(&library, &["--silent"]).status.success());
+    let sizes = sizes(&library);
+    assert_eq!(sizes["portre.heic"], (1536, 2048));
+    assert_eq!(sizes["dikey.mp4"], (32, 64));
+    let pending: i64 = library
+        .conn()
+        .query_row(
+            "SELECT COUNT(*) FROM file_hashes WHERE dims_oriented IS NULL",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(pending, 0);
+}

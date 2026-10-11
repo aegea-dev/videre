@@ -26,6 +26,7 @@ pub fn index_paths(
         .collect();
     videre::sqlite_output::write_records_in(conn, library, &records)?;
     videre::sqlite_output::resolve_unresolved(conn)?;
+    videre::sqlite_output::orient_unoriented(conn)?;
     let changed: std::collections::HashSet<String> =
         records.iter().map(|r| r.path.clone()).collect();
     crate::xmp::reconcile_xmp_in(conn, library, prec, &changed, silent)?;

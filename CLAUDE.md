@@ -869,6 +869,12 @@ above.
   and `load` enforce); the settings pages draw from both and a save lands
   whole or not at all -> `gallery::settings::validate`, `library_config::edit_many`,
   `gallery::config_form`, `static/settings-form.js`
+- `width`/`height` are the displayed size (irot, EXIF orientation or the
+  video's display matrix applied), which tiles and XMP face regions use;
+  schema 6 adds `dims_oriented` in place and the next scan turns old rows
+  from their headers, and a gallery rotate swaps them ->
+  `videre::display_size`, `videre::sqlite_output::orient_unoriented`,
+  `videre_core::library_db::upgrade_v5_to_v6`
 - The Diagnostics page shows the same documents `status --json` and
   `stats --json` print, from one builder each; its Logs tab reads lines back
   by instant (timestamps of different precision do not sort as text), primary

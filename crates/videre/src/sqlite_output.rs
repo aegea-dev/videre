@@ -180,6 +180,62 @@ pub fn resolve_unresolved(conn: &rusqlite::Connection) -> anyhow::Result<usize> 
     Ok(rows.len())
 }
 
+/// Turn the stored size of rows written before sizes were the displayed size
+/// (`dims_oriented IS NULL`), from each file's header: no file is hashed, so a
+/// library is brought current by its next scan at the cost of a header read
+/// per file. A file that cannot be read now (a drive not plugged in) keeps
+/// its row as it is and is tried again by a later scan. Returns how many rows
+/// it settled.
+pub fn orient_unoriented(conn: &rusqlite::Connection) -> anyhow::Result<usize> {
+    let rows: Vec<(String, Option<String>, String)> = conn
+        .prepare(
+            "SELECT path, mime, coalesce(ext, '') FROM file_hashes
+             WHERE dims_oriented IS NULL",
+        )?
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+        .collect::<rusqlite::Result<_>>()?;
+    if rows.is_empty() {
+        return Ok(0);
+    }
+    use videre_core::io_timeout::{
+        min_read_rate_mb_s, run_with_timeout, timeout_for_size, STAT_TIMEOUT,
+    };
+    let mut sized: Vec<(String, Option<(u32, u32)>)> = Vec::new();
+    for (path, mime, ext) in rows {
+        // Every read on the library volume is bounded, so a drive that stops
+        // answering skips its files rather than hanging the scan.
+        let owned = std::path::PathBuf::from(&path);
+        let Ok(Ok(len)) = run_with_timeout(STAT_TIMEOUT, move || {
+            std::fs::metadata(owned).map(|m| m.len())
+        }) else {
+            continue;
+        };
+        let owned = std::path::PathBuf::from(&path);
+        let budget = timeout_for_size(len, min_read_rate_mb_s());
+        let Ok(Ok(size)) = run_with_timeout(budget, move || {
+            Ok::<_, std::io::Error>(crate::display_size::of_path(&owned, mime.as_deref(), &ext))
+        }) else {
+            continue;
+        };
+        sized.push((path, size));
+    }
+    let tx = conn.unchecked_transaction()?;
+    {
+        // A file with no readable size (not an image or video) keeps what it
+        // had, and is settled all the same.
+        let mut update = tx.prepare(
+            "UPDATE file_hashes SET width = coalesce(?2, width), height = coalesce(?3, height),
+                 dims_oriented = 1
+             WHERE path = ?1",
+        )?;
+        for (path, size) in &sized {
+            update.execute(params![path, size.map(|s| s.0), size.map(|s| s.1)])?;
+        }
+    }
+    tx.commit()?;
+    Ok(sized.len())
+}
+
 fn write_records_to(conn: &rusqlite::Connection, records: &[FileRecord]) -> Result<()> {
     videre_core::library_db::ensure_scan_schema(conn)?;
     // Only a record the file itself leaves short of a date or a place needs
@@ -200,9 +256,9 @@ fn write_records_to(conn: &rusqlite::Connection, records: &[FileRecord]) -> Resu
                 (path, hash, size_bytes, created_at, modified_at, ext, mime,
                  phash, exif_date, gps_lat, gps_lon, width, height,
                  duration_secs, codec, meta_hash, capture_date, date_source,
-                 gps_source)
+                 gps_source, dims_oriented)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
-                     ?14, ?15, ?16, ?17, ?18, ?19)
+                     ?14, ?15, ?16, ?17, ?18, ?19, 1)
              ON CONFLICT(path) DO UPDATE SET
                 hash = excluded.hash,
                 meta_hash = excluded.meta_hash,
@@ -219,6 +275,7 @@ fn write_records_to(conn: &rusqlite::Connection, records: &[FileRecord]) -> Resu
                 gps_lon = excluded.gps_lon,
                 width = excluded.width,
                 height = excluded.height,
+                dims_oriented = 1,
                 duration_secs = excluded.duration_secs,
                 codec = excluded.codec,
                 capture_date = excluded.capture_date,

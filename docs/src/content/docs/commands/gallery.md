@@ -83,9 +83,12 @@ button, **Escape**, or a click outside the item all close the lightbox.
 
 JPEG, PNG, TIFF and WebP rotate by their EXIF orientation. A HEIC rotates by
 its rotation property, the one iPhones write and Photos and Preview display
-by, and its EXIF orientation is kept in step. A HEIC saved without that
-property cannot be rotated here, so the request is refused and the file is
-left untouched. A rotation changes what the photo shows but not its identity,
+by, and its EXIF orientation is kept in step. Some older iPhone photos have no
+rotation property, only an EXIF orientation, which the gallery cannot use for a
+HEIC, so they can show sideways; the first rotation adds the property, and sets
+the EXIF orientation to match. The picture data is never touched, and a file
+the gallery cannot rewrite safely is refused and left untouched. A rotation
+changes what the photo shows but not its identity,
 so everything videre worked out from the old orientation is dropped at once:
 cached previews are rendered again, and the photo's search embedding and
 category are redone by the next [`videre embed`](/commands/embed/) or

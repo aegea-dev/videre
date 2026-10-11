@@ -1,0 +1,10 @@
+testsrc_64x32_rot90.mp4 was generated with:
+
+ffmpeg -f lavfi -i testsrc=s=64x32:d=1 -c:v libx264 -pix_fmt yuv420p -movflags +faststart flat.mp4
+ffmpeg -display_rotation 90 -i flat.mp4 -c copy -movflags +faststart testsrc_64x32_rot90.mp4
+
+A 1-second, 64x32 H.264 test pattern whose track header carries a 90-degree
+display matrix, as a phone writes a portrait clip: stored landscape, shown
+32x64. Used to check that the scan stores the displayed size. ffmpeg is not a
+project dependency; regenerate with the commands above if it ever needs to
+change.
