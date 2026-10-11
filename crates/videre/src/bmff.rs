@@ -98,6 +98,83 @@ pub(crate) fn item_types<F: Read + Seek>(
     Some(item_types)
 }
 
+/// One number in `iloc`: where it is in the file, how many bytes it takes,
+/// and its value. A field of size 0 is absent and reads as 0.
+pub(crate) struct IlocField {
+    pub at: u64,
+    pub size: usize,
+    pub value: u64,
+}
+
+/// One item's entry in `iloc`, with where each of its numbers is, so an edit
+/// that moves item data can rewrite them.
+pub(crate) struct IlocItem {
+    pub id: u32,
+    /// 0: offsets into the file; 1: into `idat`; 2: into another item.
+    pub method: u64,
+    pub base: IlocField,
+    /// Each extent's offset field and its length.
+    pub extents: Vec<(IlocField, u64)>,
+}
+
+/// Every item in `iloc`, in table order.
+pub(crate) fn iloc_items<F: Read + Seek>(
+    f: &mut F,
+    children: &[Bmff],
+    len: u64,
+) -> Option<Vec<IlocItem>> {
+    let iloc = find(children, b"iloc")?;
+    let body = read_at(f, iloc.payload, iloc.end - iloc.payload, len)?;
+    let version = *body.first()?;
+    let mut at = 4usize;
+    let take = |at: &mut usize, n: usize| -> Option<IlocField> {
+        let bytes = body.get(*at..*at + n)?;
+        let field = IlocField {
+            at: iloc.payload + *at as u64,
+            size: n,
+            value: bytes.iter().fold(0u64, |acc, b| (acc << 8) | *b as u64),
+        };
+        *at += n;
+        Some(field)
+    };
+    let sizes = take(&mut at, 1)?.value as u8;
+    let (offset_size, length_size) = ((sizes >> 4) as usize, (sizes & 0xF) as usize);
+    let sizes = take(&mut at, 1)?.value as u8;
+    let base_size = (sizes >> 4) as usize;
+    let index_size = if version == 1 || version == 2 {
+        (sizes & 0xF) as usize
+    } else {
+        0
+    };
+    let count = take(&mut at, if version < 2 { 2 } else { 4 })?.value;
+    let mut items = Vec::new();
+    for _ in 0..count {
+        let id = take(&mut at, if version < 2 { 2 } else { 4 })?.value as u32;
+        let method = if version == 1 || version == 2 {
+            take(&mut at, 2)?.value & 0xF
+        } else {
+            0
+        };
+        take(&mut at, 2)?; // data reference index
+        let base = take(&mut at, base_size)?;
+        let n = take(&mut at, 2)?.value;
+        let mut extents = Vec::new();
+        for _ in 0..n {
+            take(&mut at, index_size)?;
+            let offset = take(&mut at, offset_size)?;
+            let length = take(&mut at, length_size)?.value;
+            extents.push((offset, length));
+        }
+        items.push(IlocItem {
+            id,
+            method,
+            base,
+            extents,
+        });
+    }
+    Some(items)
+}
+
 /// Every item's data extents from `iloc`, in file offsets, by item ID. An
 /// extent in `idat` (construction method 1) is resolved against it; any
 /// other method, a zero-length extent or one past the end is `None`.
@@ -107,54 +184,25 @@ pub(crate) fn item_extents<F: Read + Seek>(
     len: u64,
 ) -> Option<BTreeMap<u32, Vec<Range<u64>>>> {
     let idat = find(children, b"idat").map(|b| b.payload);
-    let iloc = find(children, b"iloc")?;
-    let body = read_at(f, iloc.payload, iloc.end - iloc.payload, len)?;
-    let version = *body.first()?;
-    let mut at = 4usize;
-    let take = |at: &mut usize, n: usize| -> Option<u64> {
-        let bytes = body.get(*at..*at + n)?;
-        *at += n;
-        Some(bytes.iter().fold(0u64, |acc, b| (acc << 8) | *b as u64))
-    };
-    let sizes = take(&mut at, 1)? as u8;
-    let (offset_size, length_size) = ((sizes >> 4) as usize, (sizes & 0xF) as usize);
-    let sizes = take(&mut at, 1)? as u8;
-    let base_size = (sizes >> 4) as usize;
-    let index_size = if version == 1 || version == 2 {
-        (sizes & 0xF) as usize
-    } else {
-        0
-    };
-    let count = take(&mut at, if version < 2 { 2 } else { 4 })?;
     let mut extents: BTreeMap<u32, Vec<Range<u64>>> = BTreeMap::new();
-    for _ in 0..count {
-        let id = take(&mut at, if version < 2 { 2 } else { 4 })? as u32;
-        let method = if version == 1 || version == 2 {
-            take(&mut at, 2)? & 0xF
-        } else {
-            0
-        };
-        take(&mut at, 2)?; // data reference index
-        let base = take(&mut at, base_size)?;
-        let n = take(&mut at, 2)?;
-        let origin = match method {
+    for item in iloc_items(f, children, len)? {
+        let origin = match item.method {
             0 => 0,
             1 => idat?,
             _ => return None,
         };
-        for _ in 0..n {
-            take(&mut at, index_size)?;
-            let offset = take(&mut at, offset_size)?;
-            let length = take(&mut at, length_size)?;
+        for (offset, length) in item.extents {
             if length == 0 {
                 return None;
             }
-            let start = origin.checked_add(base)?.checked_add(offset)?;
+            let start = origin
+                .checked_add(item.base.value)?
+                .checked_add(offset.value)?;
             let end = start.checked_add(length)?;
             if end > len {
                 return None;
             }
-            extents.entry(id).or_default().push(start..end);
+            extents.entry(item.id).or_default().push(start..end);
         }
     }
     Some(extents)
