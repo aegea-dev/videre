@@ -794,12 +794,27 @@ pub(crate) fn mark_fields_json(m: Option<&videre_core::marks::Marks>) -> String 
     format!(",\"rating\":{rating},\"pick\":{pick},\"label\":{label},\"liked\":{liked}")
 }
 
+/// How a file's named faces are written into its row.
+#[derive(Clone, Copy, PartialEq)]
+pub(crate) enum FaceForm {
+    /// A live page: each face's id, whose picture the browser fetches from
+    /// `/api/faces/{id}/image` when a lightbox opens.
+    Id,
+    /// A static gallery export, which has no server to ask: each face's
+    /// picture inline, cut from the decoded original. Built once per export.
+    Picture,
+    /// A duplicates review page: the names alone. Cutting pictures out of the
+    /// thousands of files a similar review lists meant decoding every one of
+    /// them, for hours, to compare copies rather than people.
+    Name,
+}
+
 pub(crate) fn file_to_json_with_faces(
     f: &FileRow,
     heic: bool,
     heic_original: bool,
     faces: &[videre_core::face_db::LabeledFace],
-    live: bool,
+    form: FaceForm,
 ) -> String {
     let (tb, fb) = if f.ext == "heic" && heic {
         let thumb = heic_to_b64(&f.path, 240)
@@ -864,17 +879,22 @@ pub(crate) fn file_to_json_with_faces(
     // drive. It never returned, and nothing reported an error, because nothing
     // failed. It was still working.
     //
-    // A static export has no server to ask, so it keeps the inline crops. That
-    // is the whole reason `live` is threaded down here, and the cost is
-    // acceptable there because an exported page is built once, not per view.
+    // A static gallery export has no server to ask, so it keeps the inline
+    // crops, a cost paid once per export. A duplicates review page is static
+    // too but lists thousands of files to compare, not people, so it carries
+    // the names only. That is why the form is threaded down here.
     let faces_json: Vec<String> = faces
         .iter()
         .filter_map(|(id, name, bbox)| {
-            if live {
-                return Some(format!(
-                    "{{\"id\":{id},\"name\":{name}}}",
-                    name = json_str(name),
-                ));
+            match form {
+                FaceForm::Id => {
+                    return Some(format!(
+                        "{{\"id\":{id},\"name\":{name}}}",
+                        name = json_str(name),
+                    ))
+                }
+                FaceForm::Name => return Some(format!("{{\"name\":{}}}", json_str(name))),
+                FaceForm::Picture => {}
             }
             let bbox = parse_bbox(bbox)?;
             let thumb = face_thumb_b64(&f.path, bbox, *id)?;
@@ -921,7 +941,7 @@ fn group_to_json(
     heic: bool,
     heic_original: bool,
     faces_by_hash: &videre_core::face_db::LabeledFacesByHash,
-    live: bool,
+    form: FaceForm,
 ) -> String {
     let hash_prefix = &group[0].hash[..group[0].hash.len().min(8)];
     let waste = group_waste(kind, group);
@@ -942,7 +962,7 @@ fn group_to_json(
                     .get(&f.hash)
                     .map(|v| v.as_slice())
                     .unwrap_or(&[]),
-                live,
+                form,
             )
         })
         .collect();
@@ -1542,13 +1562,15 @@ fn build_data_block(
             out.push(',');
         }
         out.push('\n');
+        // A live Duplicates page fetches face pictures on demand; a static
+        // review page names the people and cuts out no pictures.
         out.push_str(&group_to_json(
             group,
             *kind,
             heic,
             heic_original,
             faces_by_hash,
-            live,
+            if live { FaceForm::Id } else { FaceForm::Name },
         ));
     }
     out.push_str("\n];\n");
@@ -1584,7 +1606,11 @@ fn build_data_block(
                     .get(&f.hash)
                     .map(|v| v.as_slice())
                     .unwrap_or(&[]),
-                live,
+                if live {
+                    FaceForm::Id
+                } else {
+                    FaceForm::Picture
+                },
             );
             if let Some(m) = marks_by_hash.get(&f.hash) {
                 if obj.ends_with('}') {
@@ -1615,7 +1641,11 @@ fn build_data_block(
                     .get(&f.hash)
                     .map(|v| v.as_slice())
                     .unwrap_or(&[]),
-                live,
+                if live {
+                    FaceForm::Id
+                } else {
+                    FaceForm::Picture
+                },
             );
             if let Some(m) = marks_by_hash.get(&f.hash) {
                 if obj.ends_with('}') {

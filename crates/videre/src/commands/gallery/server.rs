@@ -3693,7 +3693,7 @@ fn files_json_response_with(
                 .get(&row.hash)
                 .map(|v| v.as_slice())
                 .unwrap_or(&[]),
-            true,
+            crate::render::FaceForm::Id,
         );
         // Splice `copies` and the marks in rather than widening FileRow, which
         // the static export also builds and has no use for either.
