@@ -16,6 +16,46 @@ version number and are released together.
 ## [Unreleased]
 
 
+## [0.62.0] - 2026-10-11
+
+### Changed
+
+- **Stored sizes are the size each photo and video is shown at.** A phone
+  stores a portrait shot landscape and marks it to be shown turned, and
+  videre stored the size before that mark. Width and height now take the
+  mark into account (a HEIC's rotation property, the EXIF orientation, a
+  video's display matrix), so the gallery's Tile view lays portrait photos
+  out portrait instead of cropping them, and XMP face regions are measured
+  against the right size. A gallery rotation turns the stored size too.
+- **`videre dedupe review` names people instead of cutting out their
+  faces.** The page decoded every file of every group to embed face
+  pictures; thousands of `similar` groups ran for hours with no output. It
+  is now written in seconds.
+- Settings and Diagnostics have no search box in the nav.
+- The README and the docs front page open with the new motto.
+
+### Fixed
+
+- **The gallery rotates HEICs that have no rotation property.** Older iPhone
+  photos carry only an EXIF orientation, which macOS ignores on a HEIC, so
+  they could show sideways and rotating them was refused. The first rotation
+  now adds the property and sets the EXIF orientation to match. No picture
+  data changes, so faces, names, marks and tags stay attached.
+
+### Upgrading
+
+- **The library schema is now 6.** The first time this version opens a
+  library it adds one column in place, which needs every other videre command
+  in that library stopped (the gallery and its watch included); then run
+  `videre scan` once, which corrects the stored sizes of existing files from
+  their headers without rehashing. Earlier versions cannot open a library
+  after the upgrade.
+- **For crates depending on `videre-core`:** `image_decode` gains
+  `displayed_size_reader`.
+- **For crates depending on `videre`:** new `display_size` module;
+  `heif_rotate::Error::NoRotation` is replaced by `CannotInsert(&str)`, and
+  `heif_rotate` gains `displayed_size`.
+
 ## [0.61.0] - 2026-10-10
 
 ### Added
@@ -3310,7 +3350,8 @@ takes the model id explicitly instead of reading it from the environment.
   skip it rather than failing.
 - First release published to crates.io.
 
-[Unreleased]: https://github.com/erhangundogan/videre/compare/v0.61.0...HEAD
+[Unreleased]: https://github.com/erhangundogan/videre/compare/v0.62.0...HEAD
+[0.62.0]: https://github.com/erhangundogan/videre/compare/v0.61.0...v0.62.0
 [0.61.0]: https://github.com/erhangundogan/videre/compare/v0.60.0...v0.61.0
 [0.60.0]: https://github.com/erhangundogan/videre/compare/v0.59.0...v0.60.0
 [0.59.0]: https://github.com/erhangundogan/videre/compare/v0.58.0...v0.59.0

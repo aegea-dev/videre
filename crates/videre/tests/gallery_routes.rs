@@ -2338,6 +2338,36 @@ fn a_heic_rotates_by_irot_and_its_faces_turn_with_it() {
     }
 }
 
+/// After a library is upgraded and before its next scan, a row still holds
+/// the size as stored, not as shown. A rotation in that window must store
+/// the size the photo is shown at after the turn, read from the file, not
+/// swap the stale one and mark it settled, which no later scan would undo.
+#[test]
+fn a_rotation_before_the_first_scan_after_upgrading_stores_the_shown_size() {
+    let (lib, portrait, _) = heic_library();
+    // As an older version stored it: the grid's stored size, unsettled.
+    lib.conn()
+        .execute(
+            "UPDATE file_hashes SET width = 2048, height = 1536, dims_oriented = NULL
+             WHERE hash = ?1",
+            [&portrait],
+        )
+        .unwrap();
+    let server = Server::start(&lib);
+    let (status, body) = server.send("POST", &format!("/api/files/{portrait}/rotate"), "");
+    assert_eq!(status, 200, "{body}");
+    // irot 270 turned clockwise is 180: shown landscape, as stored.
+    let row: (i64, i64, Option<i64>) = lib
+        .conn()
+        .query_row(
+            "SELECT width, height, dims_oriented FROM file_hashes WHERE hash = ?1",
+            [&portrait],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(row, (2048, 1536, Some(1)));
+}
+
 /// A rotation keeps the content key but changes the pixels, so the stored
 /// fingerprint and pixel signature describe a picture that no longer exists:
 /// both go, and the next `embed` fingerprints the upright pixels again.
