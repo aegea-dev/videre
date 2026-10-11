@@ -3953,8 +3953,8 @@ struct RotateQuery {
 /// default, counter-clockwise with `?dir=ccw`) by bumping its EXIF Orientation
 /// tag, or a HEIC's `irot`, in place, then drop everything derived from the
 /// old pixels (see `forget_old_pixels`). Refuses what cannot be turned (video,
-/// DNG, a HEIC with no `irot`, and the like) with 415, matching the button the
-/// gallery only shows for supported images.
+/// DNG, a HEIC whose `irot` cannot be added safely, and the like) with 415,
+/// matching the button the gallery only shows for supported images.
 async fn handle_rotate_file(
     axum::extract::Path(hash): axum::extract::Path<String>,
     Query(query): Query<RotateQuery>,
@@ -3970,7 +3970,7 @@ async fn handle_rotate_file(
         Ok(Ok(RotateOutcome::NotFound)) => StatusCode::NOT_FOUND.into_response(),
         Ok(Ok(RotateOutcome::Unsupported)) => (
             StatusCode::UNSUPPORTED_MEDIA_TYPE,
-            "this file cannot be rotated: only JPEG, PNG, TIFF, WebP and HEIC with a rotation property",
+            "this file cannot be rotated: only JPEG, PNG, TIFF, WebP and HEIC",
         )
             .into_response(),
         Ok(Err(e)) => internal(anyhow::anyhow!("rotate failed for {hash}: {e}")).into_response(),
@@ -3981,7 +3981,8 @@ async fn handle_rotate_file(
 pub(super) enum RotateOutcome {
     Rotated(u16),
     NotFound,
-    /// Not an image this can turn (videos, DNG, a HEIC with no `irot`, ...).
+    /// Not an image this can turn (videos, DNG, a HEIC whose `irot` cannot be
+    /// added safely, ...).
     Unsupported,
 }
 
@@ -4020,13 +4021,18 @@ pub(super) fn rotate_one(state: &AppState, hash: &str, ccw: bool) -> anyhow::Res
     let (dims, orientation) = if super::rotate::is_heif(&ext) {
         // A HEIC displays by its irot, which QuickLook applies; the image
         // crate cannot read it, so its size comes from the file's own boxes.
+        // One with no irot displays as stored and is given one.
         let bytes = std::fs::read(source).with_context(|| format!("read {path}"))?;
-        let rotation = match videre::heif_rotate::read(&bytes) {
-            Ok(r) => r,
-            Err(videre::heif_rotate::Error::NoRotation) => return Ok(RotateOutcome::Unsupported),
+        let rotation =
+            videre::heif_rotate::read(&bytes).map_err(|e| anyhow::anyhow!("{path}: {e}"))?;
+        let turned = match videre::heif_rotate::rotated(&bytes, ccw) {
+            Ok(turned) => turned,
+            Err(e @ videre::heif_rotate::Error::CannotInsert(_)) => {
+                tracing::warn!(path = %path, "videre gallery: {e}");
+                return Ok(RotateOutcome::Unsupported);
+            }
             Err(e) => return Err(anyhow::anyhow!("{path}: {e}")),
         };
-        let turned = videre::heif_rotate::rotated(&bytes, ccw)?;
         super::rotate::replace_file(source, &turned)?;
         let angle = videre::heif_rotate::turned(rotation.angle, ccw);
         (
