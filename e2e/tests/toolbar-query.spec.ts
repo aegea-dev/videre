@@ -1,7 +1,8 @@
 import { expect, seedFace, seedPlace, seedTrips, test } from "../support/gallery";
 
 // Search and filter sit in each tab's toolbar, beside Sort, on every page that
-// narrows by a query; elsewhere they stay in the nav.
+// narrows by a query. The tool pages from the menu have nothing to search, so
+// they have no box at all.
 test("search and filter sit in each tab's toolbar", async ({ page, isolatedGallery: gallery }) => {
   seedPlace(gallery.libraryRoot);
   seedFace(gallery.libraryRoot);
@@ -13,8 +14,11 @@ test("search and filter sit in each tab's toolbar", async ({ page, isolatedGalle
     await expect(page.locator(".secnav .secnav-search"), path).toHaveCount(0);
     await expect(box.getByRole("button", { name: "Filter" }), path).toBeVisible();
   }
-  await page.goto(`${gallery.baseURL}/settings`);
-  await expect(page.locator(".secnav .secnav-search")).toBeVisible();
+  for (const path of ["/settings", "/diagnostics"]) {
+    await page.goto(`${gallery.baseURL}${path}`);
+    await expect(page.locator("#secnav-more"), path).toBeVisible();
+    await expect(page.locator(".secnav-search"), path).toHaveCount(0);
+  }
 });
 
 test("an empty state puts the box back in the nav", async ({ page, emptyGallery: gallery }) => {
