@@ -153,11 +153,9 @@ fn parse_mvhd_unix(p: &[u8]) -> Option<i64> {
     Some(unix)
 }
 
-/// Width and height from `tkhd`, stored as 16.16 fixed point.
-///
-/// The display matrix that precedes them can encode a rotation, so a portrait
-/// video commonly reports landscape dimensions here. Applying the matrix is out
-/// of scope: a wrong aspect ratio is cosmetic, where a wrong date is not.
+/// The size a video is shown at: width and height from `tkhd` (16.16 fixed
+/// point), swapped when the display matrix before them is a quarter turn, as
+/// a phone writes a portrait clip it stored landscape.
 fn parse_tkhd(p: &[u8]) -> Option<(u32, u32)> {
     let version = *p.first()?;
     // version+flags(4) + times/id/reserved/duration + reserved(8) + layer(2)
@@ -169,7 +167,12 @@ fn parse_tkhd(p: &[u8]) -> Option<(u32, u32)> {
     };
     let w = be32(p, at)? >> 16;
     let h = be32(p, at + 4)? >> 16;
-    (w > 0 && h > 0).then_some((w, h))
+    // The matrix is { a b u, c d v, x y w }: a quarter turn has a = d = 0 and
+    // b, c nonzero (an all-zero matrix is no turn at all).
+    let matrix = at - 36;
+    let m = |i: usize| be32(p, matrix + 4 * i);
+    let quarter = m(0)? == 0 && m(4)? == 0 && m(1)? != 0 && m(3)? != 0;
+    (w > 0 && h > 0).then_some(if quarter { (h, w) } else { (w, h) })
 }
 
 /// First sample entry's 4-byte format tag from `stsd`.
@@ -520,6 +523,18 @@ mod tests {
         p.extend_from_slice(&(1920u32 << 16).to_be_bytes());
         p.extend_from_slice(&(1080u32 << 16).to_be_bytes());
         assert_eq!(parse_tkhd(&p), Some((1920, 1080)));
+    }
+
+    #[test]
+    fn a_quarter_turn_matrix_swaps_the_size() {
+        // A phone's portrait clip: { 0 1 0, -1 0 0, ... } in 16.16 fixed point.
+        let mut p = vec![0u8; 4 + 20 + 16];
+        for v in [0u32, 0x0001_0000, 0, 0xFFFF_0000, 0, 0, 0, 0, 0x4000_0000] {
+            p.extend_from_slice(&v.to_be_bytes());
+        }
+        p.extend_from_slice(&(1920u32 << 16).to_be_bytes());
+        p.extend_from_slice(&(1080u32 << 16).to_be_bytes());
+        assert_eq!(parse_tkhd(&p), Some((1080, 1920)));
     }
 
     #[test]

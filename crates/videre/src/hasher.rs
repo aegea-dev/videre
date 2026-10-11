@@ -271,27 +271,21 @@ fn hash_open_file(
         _ => ExtractedMeta::default(),
     };
 
-    // EXIF often omits pixel dimensions (AI-generated images, screenshots, many
-    // PNGs), yet width/height are load-bearing for XMP face-region export and
-    // import, which normalize pixel bboxes against them. Fall back to the image
-    // header, which `image::image_dimensions` reads without decoding pixels.
-    // Images only: video dimensions come from the container above, and a HEIC or
-    // non-image file simply fails the read and stays NULL.
+    // The stored size is the size the file is shown at (`display_size`): the
+    // gallery lays tiles out by it, and XMP face-region export and import
+    // normalize the displayed-canvas face boxes against it. EXIF pixel
+    // dimensions are the stored pixels, before the camera's rotation mark,
+    // and are often missing (screenshots, many PNGs), so they are only the
+    // fallback for a format whose header cannot be read (RAW). Video sizes
+    // come from the container above, already turned by its display matrix.
     let is_video = videre_core::mime_probe::effective_mime(mime.as_deref(), &ext)
         .is_some_and(videre_core::mime_probe::is_video_mime);
-    if !is_video && (meta.width.is_none() || meta.height.is_none()) {
+    if !is_video {
         if let Ok(image_file) = file.try_clone() {
             let mut image_file = progress.wrap(image_file);
-            let dimensions = image_file
-                .seek(SeekFrom::Start(0))
-                .ok()
-                .and_then(|_| {
-                    image::ImageReader::new(BufReader::new(image_file))
-                        .with_guessed_format()
-                        .ok()
-                })
-                .and_then(|reader| reader.into_dimensions().ok());
-            if let Some((w, h)) = dimensions {
+            if let Some((w, h)) =
+                crate::display_size::of_reader(&mut image_file, size_bytes, mime.as_deref(), &ext)
+            {
                 meta.width = Some(w);
                 meta.height = Some(h);
             }
@@ -559,8 +553,9 @@ mod tests {
         assert_eq!(record.exif_date.as_deref(), Some("2021-08-10T19:34:03"));
         assert!(record.gps_lat.is_some());
         assert!(record.gps_lon.is_some());
-        assert_eq!(record.width, Some(4032));
-        assert_eq!(record.height, Some(3024));
+        // Stored 4032x3024 with EXIF Orientation 6: shown 3024 wide.
+        assert_eq!(record.width, Some(3024));
+        assert_eq!(record.height, Some(4032));
     }
 
     #[test]

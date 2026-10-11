@@ -4054,6 +4054,20 @@ pub(super) fn rotate_one(state: &AppState, hash: &str, ccw: bool) -> anyhow::Res
     if let Some((display_w, display_h)) = dims {
         rotate_faces_geometry(state, hash, ccw, display_w as i32, display_h as i32);
     }
+    // The stored size is the displayed size (`videre::display_size`), which a
+    // quarter turn swaps.
+    {
+        let conn = state
+            .conn
+            .lock()
+            .map_err(|_| anyhow::anyhow!("the database connection lock is poisoned"))?;
+        conn.execute(
+            "UPDATE file_hashes SET width = height, height = width, dims_oriented = 1
+             WHERE hash = ?1",
+            [hash],
+        )
+        .with_context(|| format!("turn the stored size of {hash}"))?;
+    }
     forget_old_pixels(state, hash)?;
     Ok(RotateOutcome::Rotated(orientation))
 }

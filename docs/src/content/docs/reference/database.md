@@ -42,14 +42,17 @@ CREATE TABLE file_hashes (
     capture_date TEXT,
     date_source TEXT,
     gps_source  TEXT,
+    dims_oriented INTEGER,
     FOREIGN KEY (location_cluster_id) REFERENCES location_clusters(id)
         ON DELETE RESTRICT ON UPDATE RESTRICT
 );
 ```
 
-This is the table's shape at schema 5. A schema 3 or 4 library is upgraded in
-place on a writable open; schema 5 adds the three date and GPS source columns,
-which the next scan fills without rehashing. Older libraries with incompatible content keys are refused:
+This is the table's shape at schema 6. A schema 3, 4 or 5 library is upgraded
+in place on a writable open, with no other videre command running in it;
+schema 5 adds the three date and GPS source columns and schema 6 adds
+`dims_oriented`, both filled by the next scan without rehashing. Older
+libraries with incompatible content keys are refused:
 remove their `.videre` directory and run `videre scan`.
 
 | Column | Notes |
@@ -63,6 +66,8 @@ remove their `.videre` directory and run `videre scan`.
 | `capture_date` | The one date for the file, a local wall clock (`YYYY-MM-DDTHH:MM:SS`), from the first of: EXIF, a video's Apple creation date, a Google Takeout sidecar, a video's `mvhd` time, the file's modification time |
 | `date_source` | Where `capture_date` came from: `exif`, `video`, `sidecar`, `mvhd` or `mtime`. NULL until the next scan resolves it |
 | `gps_source` | Where the coordinates came from: `exif`, or `sidecar` for a Takeout sidecar's `geoData`. NULL with no GPS |
+| `width`, `height` | The size the file is shown at: the stored pixels turned by the file's rotation mark (a HEIC's `irot`, the EXIF orientation, a video's display matrix), so a portrait photo a phone stored landscape is taller than wide. A gallery rotation swaps them |
+| `dims_oriented` | 1 once `width` and `height` are the shown size. NULL on a row stored before that, which the next scan corrects from the file's header without rehashing |
 | `location_name` | Filled in lazily, not by `scan`. See [`watch --location`](/commands/watch/) |
 | `location_cluster_id` | Set by [`videre locations`](/commands/locations/) |
 

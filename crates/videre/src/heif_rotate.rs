@@ -20,7 +20,7 @@
 //! too large for its field, data stored another way) is refused.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::io::Cursor;
+use std::io::{Cursor, Read, Seek};
 use std::ops::Range;
 
 use crate::bmff::{self, read_at};
@@ -116,14 +116,17 @@ pub fn rotated(bytes: &[u8], ccw: bool) -> Result<Vec<u8>, Error> {
     Ok(out)
 }
 
-/// `None` for a file that does not parse. A primary with no `irot` reads as
-/// angle 0 with nothing in `irot_at`: shown as stored.
-fn parse(bytes: &[u8]) -> Option<Result<HeifRotation, Error>> {
-    let len = bytes.len() as u64;
-    let f = &mut Cursor::new(bytes);
-    let children = bmff::meta_children(f, len)?;
-    let types = bmff::item_types(f, &children, len)?;
+/// The primary's angle and displayed size, and the `irot` boxes a turn
+/// changes, from the file's boxes alone: no item data is read.
+struct Layout {
+    children: Vec<bmff::Bmff>,
+    angle: u8,
+    display: (u32, u32),
+    irot_at: Vec<u64>,
+}
 
+fn layout<F: Read + Seek>(f: &mut F, len: u64) -> Option<Layout> {
+    let children = bmff::meta_children(f, len)?;
     let primary = primary_item(f, &children, len)?;
     let related = related_items(f, &children, primary, len)?;
 
@@ -143,7 +146,7 @@ fn parse(bytes: &[u8]) -> Option<Result<HeifRotation, Error>> {
 
     let angle = match property_of(primary, b"irot") {
         Some(irot) if irot.payload >= irot.end => return None,
-        Some(irot) => bytes[irot.payload as usize] & 3,
+        Some(irot) => read_at(f, irot.payload, 1, len)?[0] & 3,
         None => 0,
     };
     let irot_at: BTreeSet<u64> = related
@@ -161,8 +164,28 @@ fn parse(bytes: &[u8]) -> Option<Result<HeifRotation, Error>> {
         u32::from_be_bytes(wh[4..8].try_into().ok()?),
     );
     let display = if angle % 2 == 1 { (h, w) } else { (w, h) };
+    Some(Layout {
+        children,
+        angle,
+        display,
+        irot_at: irot_at.into_iter().collect(),
+    })
+}
 
-    let extents = bmff::item_extents(f, &children, len)?;
+/// The size a HEIC is shown at, its primary's `ispe` turned by its `irot`,
+/// read from the boxes at the start of the file without its image data.
+pub fn displayed_size<F: Read + Seek>(f: &mut F, len: u64) -> Option<(u32, u32)> {
+    layout(f, len).map(|l| l.display)
+}
+
+/// `None` for a file that does not parse. A primary with no `irot` reads as
+/// angle 0 with nothing in `irot_at`: shown as stored.
+fn parse(bytes: &[u8]) -> Option<Result<HeifRotation, Error>> {
+    let len = bytes.len() as u64;
+    let f = &mut Cursor::new(bytes);
+    let l = layout(f, len)?;
+    let types = bmff::item_types(f, &l.children, len)?;
+    let extents = bmff::item_extents(f, &l.children, len)?;
     let orientation_at = types
         .iter()
         .find(|(_, kind)| *kind == b"Exif")
@@ -170,15 +193,15 @@ fn parse(bytes: &[u8]) -> Option<Result<HeifRotation, Error>> {
         .and_then(|ranges| exif_orientation(bytes, ranges));
 
     Some(Ok(HeifRotation {
-        angle,
-        display,
-        irot_at: irot_at.into_iter().collect(),
+        angle: l.angle,
+        display: l.display,
+        irot_at: l.irot_at,
         orientation_at,
     }))
 }
 
 /// The primary item's ID, from `pitm`.
-fn primary_item(f: &mut Cursor<&[u8]>, children: &[bmff::Bmff], len: u64) -> Option<u32> {
+fn primary_item<F: Read + Seek>(f: &mut F, children: &[bmff::Bmff], len: u64) -> Option<u32> {
     let pitm = bmff::find(children, b"pitm")?;
     let head = read_at(f, pitm.payload, 8.min(pitm.end - pitm.payload), len)?;
     Some(match head.first()? {
@@ -189,8 +212,8 @@ fn primary_item(f: &mut Cursor<&[u8]>, children: &[bmff::Bmff], len: u64) -> Opt
 
 /// The items that are thumbnails of `primary` (`thmb` references to it): the
 /// ones an iPhone shares its `irot` with.
-fn thumbnails(
-    f: &mut Cursor<&[u8]>,
+fn thumbnails<F: Read + Seek>(
+    f: &mut F,
     children: &[bmff::Bmff],
     primary: u32,
     len: u64,
@@ -429,8 +452,8 @@ fn inserted(bytes: &[u8], r: &HeifRotation, angle: u8) -> Result<Vec<u8>, Error>
 /// direction: its thumbnail, auxiliary images (depth, gain map) and, for a
 /// grid, its tiles. The `Exif` item's `cdsc` link is harmless: it has no
 /// `irot`.
-fn related_items(
-    f: &mut Cursor<&[u8]>,
+fn related_items<F: Read + Seek>(
+    f: &mut F,
     children: &[bmff::Bmff],
     primary: u32,
     len: u64,
@@ -462,8 +485,8 @@ fn related_items(
 }
 
 /// Every item's property indices from `ipma`.
-fn associations(
-    f: &mut Cursor<&[u8]>,
+fn associations<F: Read + Seek>(
+    f: &mut F,
     iprp_children: &[bmff::Bmff],
     len: u64,
 ) -> Option<BTreeMap<u32, Vec<u16>>> {
