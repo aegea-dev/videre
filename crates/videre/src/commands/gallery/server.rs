@@ -6829,6 +6829,8 @@ mod settings_api_tests {
         );
         assert!(html.contains("\"value\":7"), "read when the page rendered");
         assert!(html.contains("id=\"secnav-more\""), "carries the nav menu");
+        // Nothing here to search or filter.
+        assert!(!html.contains("id=\"nav-search\""), "no search box");
 
         let html = page(&app, "/settings/gallery").await;
         assert!(html.contains("data-kind=\"gallery\""));
@@ -6878,6 +6880,7 @@ mod settings_api_tests {
             assert!(html.contains(&format!("data-tab=\"{tab}\"")), "{tab}");
             assert!(html.contains("class=\"on\" aria-current=\"page\""), "{tab}");
             assert!(html.contains("id=\"secnav-more\""), "carries the nav menu");
+            assert!(!html.contains("id=\"nav-search\""), "no search box: {tab}");
         }
 
         let response = get_uri("/diagnostics/kasaba").await;
@@ -6911,6 +6914,7 @@ mod settings_api_tests {
                 html.contains("role=\"menuitem\" href=\"/diagnostics\""),
                 "{uri}"
             );
+            assert!(html.contains("id=\"nav-search\""), "{uri} searches");
         }
     }
 

@@ -1206,6 +1206,11 @@ impl Section {
     pub(crate) fn is_events(&self) -> bool {
         *self == Section::Events
     }
+    /// Whether the nav's search box belongs on this page: not on the tool
+    /// pages from the `...` menu, which have no files to search or filter.
+    pub(crate) fn has_search(&self) -> bool {
+        !matches!(self, Section::Settings | Section::Diagnostics)
+    }
 }
 
 #[derive(askama::Template)]
