@@ -4054,19 +4054,21 @@ pub(super) fn rotate_one(state: &AppState, hash: &str, ccw: bool) -> anyhow::Res
     if let Some((display_w, display_h)) = dims {
         rotate_faces_geometry(state, hash, ccw, display_w as i32, display_h as i32);
     }
-    // The stored size is the displayed size (`videre::display_size`), which a
-    // quarter turn swaps.
-    {
+    // The stored size is the shown size (`videre::display_size`), read again
+    // from the turned file rather than swapped: a row stored before sizes
+    // were the shown size (`dims_oriented` NULL, until the next scan) holds
+    // the stored size, and swapping it would record a wrong size as settled.
+    if let Some((w, h)) = videre::display_size::of_path(source, None, &ext) {
         let conn = state
             .conn
             .lock()
             .map_err(|_| anyhow::anyhow!("the database connection lock is poisoned"))?;
         conn.execute(
-            "UPDATE file_hashes SET width = height, height = width, dims_oriented = 1
+            "UPDATE file_hashes SET width = ?2, height = ?3, dims_oriented = 1
              WHERE hash = ?1",
-            [hash],
+            rusqlite::params![hash, w, h],
         )
-        .with_context(|| format!("turn the stored size of {hash}"))?;
+        .with_context(|| format!("record the shown size of {hash}"))?;
     }
     forget_old_pixels(state, hash)?;
     Ok(RotateOutcome::Rotated(orientation))
