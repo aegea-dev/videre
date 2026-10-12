@@ -495,6 +495,37 @@ fn a_sized_video_request_returns_an_oriented_poster_jpeg() {
     );
 }
 
+// A HEIC tile the gallery converts is kept, like a raster tile or a video
+// poster. watch caches 240 and 1200 px but tiles ask for 480, so before this
+// every HEIC tile paid a QuickLook conversion (~0.44 s) on every visit.
+#[test]
+#[cfg(target_os = "macos")]
+fn a_heic_tile_the_gallery_converts_is_cached() {
+    let lib = TestLibrary::new();
+    let dst = lib
+        .copy_fixture("heic/grid_rot90.heic", "Çiğdem_doğum_günü.heic")
+        .canonicalize()
+        .unwrap();
+    lib.init_db()
+        .execute(
+            "INSERT INTO file_hashes (path, hash, ext, size_bytes) VALUES (?1, 'heic1', 'heic', 1000)",
+            [dst.to_string_lossy().as_ref()],
+        )
+        .unwrap();
+    let cached = videre_core::thumb_cache::thumb_path_in(&lib.context().cache, "heic1", 480);
+
+    let server = Server::start(&lib);
+    let (status, content_type, body) = server.get_bytes("/api/files/heic1/raw?size=480");
+    assert_eq!(status, 200);
+    assert_eq!(content_type.as_deref(), Some("image/jpeg"));
+    assert_eq!(
+        std::fs::read(&cached).ok(),
+        Some(body),
+        "the converted tile was not kept at {}",
+        cached.display()
+    );
+}
+
 #[test]
 #[cfg(target_os = "macos")]
 fn a_conversion_waits_for_a_machine_wide_quicklook_slot() {

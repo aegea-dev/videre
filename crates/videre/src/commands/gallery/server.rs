@@ -5575,6 +5575,17 @@ async fn handle_raw_file(
         )),
         _ => None,
     };
+    // Where a HEIC tile this server converts is kept, the file watch's HEIC
+    // stage writes for its own sizes. Tiles ask for sizes watch does not make,
+    // and an unkept conversion cost every later request QuickLook seconds.
+    let heic_cache = match (is_heic, size) {
+        (true, Some(px)) => Some((
+            state.context.library.cache.thumbnails.clone(),
+            videre_core::thumb_cache::thumb_tmp_path_in(&state.context.library.cache, &hash, px),
+            videre_core::thumb_cache::thumb_path_in(&state.context.library.cache, &hash, px),
+        )),
+        _ => None,
+    };
     let converted = tokio::task::spawn_blocking(move || -> Option<(&'static str, Vec<u8>)> {
         if ext == "heic" {
             // `size` doubles as the qlmanage render cap: when Some, this
@@ -5601,6 +5612,12 @@ async fn handle_raw_file(
                 image::ImageFormat::Jpeg,
             )
             .ok()?;
+            if let Some((dir, tmp, final_)) = &heic_cache {
+                let _ = std::fs::create_dir_all(dir);
+                if std::fs::write(tmp, &buf).is_ok() {
+                    let _ = std::fs::rename(tmp, final_);
+                }
+            }
             Some(("image/jpeg", buf))
         } else if matches!(ext.as_str(), "mov" | "mp4") && size.is_some() {
             // Video poster: QuickLook renders the frame display-oriented, so the
