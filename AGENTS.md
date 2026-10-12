@@ -40,7 +40,7 @@ The clippy CI job runs on **Linux**, so a macOS `make lint-check` cannot see a
 lint that only exists in the Linux config (the `cfg(target_os = "macos")`
 branches are compiled out there). When a change touches `cfg(target_os = ...)`
 code or its helpers/tests, verify with `make lint-linux` (Docker) before
-pushing. Details and the reasoning are in CLAUDE.md's `## CI` section.
+pushing.
 
 ## Development Rules
 
@@ -63,5 +63,4 @@ pushing. Details and the reasoning are in CLAUDE.md's `## CI` section.
   **not** add a `[Unreleased]` entry and does **not** bump the version. A
   separate batched release PR bumps the version (all four crates share one) and
   writes that version's changelog section from the PRs merged since the last
-  tag. Details in CLAUDE.md ("Getting a change in" and "Release and
-  publishing").
+  tag.

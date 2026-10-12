@@ -1,3 +1,6 @@
+//! Scoring a face clustering against labeled faces, for `videre faces
+//! --evaluate`.
+
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;

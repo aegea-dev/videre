@@ -91,8 +91,7 @@ test("people pages request only the face crops near the screen", async ({
 
   const onPeople = await crops("/people");
   await expect(page.locator("img.face-img")).not.toHaveCount(0);
-  // The one face a learning question shows is on screen; it loads at once.
-  expect(await page.locator("img.face-img:not([loading=lazy]):not(.q-face)").count()).toBe(0);
+  expect(await page.locator("img.face-img:not([loading=lazy])").count()).toBe(0);
   expect(onPeople, "the 300 unclustered faces are not all requested").toBeLessThan(200);
 
   const onPerson = await crops("/people/person/ayse");

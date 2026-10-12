@@ -14,12 +14,11 @@ use videre_core::marks::{self, XmpPrecedence};
 
 /// The shared `--xmp <db|file|newest>` flag for scan, watch and import. Resolves
 /// to a precedence: the flag if given, else the config default, else `db`.
-/// `--xmp newest` is accepted but not implemented yet. A warning, so it is
-/// shown and logged under `--silent` too: silent hides progress, never a
-/// degraded result.
+/// `--xmp newest` behaves as `db`, with a warning, so it is shown and logged
+/// under `--silent` too: silent hides progress, never a degraded result.
 pub(crate) fn warn_if_newest(prec: videre_core::marks::XmpPrecedence) {
     if matches!(prec, videre_core::marks::XmpPrecedence::Newest) {
-        tracing::warn!("--xmp newest is not yet implemented; treating as db");
+        tracing::warn!("--xmp newest behaves as db");
     }
 }
 

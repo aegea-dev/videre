@@ -183,7 +183,6 @@ const ROUTE_STEMS: &[&str] = &[
     "date",
     "map",
     "events",
-    "smart",
     "faces",
     "cluster",
     "person",

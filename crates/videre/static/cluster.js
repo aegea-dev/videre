@@ -156,15 +156,7 @@ const clusterId = window.CLUSTER_ID;
       if (!confirm(`Dissolve cluster ${clusterId}? Its ${facesData.length} face(s) will become unassigned singletons (not deleted).`)) return;
       const r = await fetch(`/api/clusters/${clusterId}`, { method: 'DELETE' });
       if (!r.ok) { document.getElementById('status').textContent = await failureText(r, 'dissolve failed'); return; }
-      const ack = await r.json().catch(() => null);
-      // The teaching note is a learning update, shown only when the library
-      // turned learning and its updates on in gallery.json.
-      const showUpdates = typeof settingOneOf === 'function'
-        && settingOneOf('faces.learning') === true
-        && settingOneOf('faces.learningUpdates') === true;
-      const taught = showUpdates && ack && Array.isArray(ack.event_ids) && ack.event_ids.length;
-      document.getElementById('status').textContent = 'Cluster dissolved'
-        + (taught ? '; the negative example was recorded' : '');
+      document.getElementById('status').textContent = 'Cluster dissolved';
       setTimeout(() => { window.location.href = peopleHome(); }, 500);
     }
 

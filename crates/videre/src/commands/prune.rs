@@ -424,7 +424,7 @@ pub(crate) fn run_prune(
         Err(error) => {
             report_failure(
                 error,
-                "cleaning up orphan faces and face learning".to_owned(),
+                "cleaning up orphan faces".to_owned(),
                 &library.paths.db.display().to_string(),
             );
             errors += 1;
@@ -660,7 +660,6 @@ pub(crate) fn run_prune(
         };
         // Only what happened, like the other notes: most prunes touch no face.
         let face_note = face_report.map_or_else(String::new, |report| {
-            let learning = &report.learning;
             let mut parts = Vec::new();
             if report.faces > 0 {
                 parts.push(format!(
@@ -670,21 +669,6 @@ pub(crate) fn run_prune(
             }
             if report.scanned_hashes > 0 {
                 parts.push(format!("{} face scan marker(s)", report.scanned_hashes));
-            }
-            if learning.events_invalidated > 0 {
-                parts.push(format!(
-                    "{} learning event(s) invalidated",
-                    learning.events_invalidated
-                ));
-            }
-            if learning.questions_superseded > 0 {
-                parts.push(format!(
-                    "{} question(s) superseded",
-                    learning.questions_superseded
-                ));
-            }
-            if learning.profile_retired {
-                parts.push("the active learned profile retired".to_owned());
             }
             if parts.is_empty() {
                 return String::new();

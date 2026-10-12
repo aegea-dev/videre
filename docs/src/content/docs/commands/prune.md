@@ -53,9 +53,7 @@ videre prune --dry-run
 2. Refreshes the stored timestamp of any file whose modification time has
    changed since the last pass
 3. Removes face detections and face-scan markers whose content has no indexed
-   path. Person names and the learning journal remain; evidence from removed
-   faces becomes ineligible, pending questions are withdrawn, and an active
-   learned profile is retired if an eligible event lost its source
+   path. Person names remain
 4. Deletes embeddings whose photo is gone, across **every**
    [model](/reference/models/), and the photo's marks and the pixel
    signature [dedupe](/commands/dedupe/) keeps to confirm resized copies
@@ -65,8 +63,8 @@ videre prune --dry-run
    embeddings at all, typically one an interrupted or failed `videre embed`
    left behind
 
-Steps 4 and 5 reclaim derived data on disk. Step 3 keeps the People page and
-face learning consistent with the indexed files.
+Steps 4 and 5 reclaim derived data on disk. Step 3 keeps the People page
+consistent with the indexed files.
 
 Step 2 only touches rows that actually differ, so the count tells you something.
 Its usual cause is another program changing a file's modification time.
@@ -80,8 +78,8 @@ still in use by the surviving copy. The same rule protects faces and face-scan
 markers.
 
 :::note[`--dry-run` undercounts orphans]
-The orphan counts in a dry run, including faces, scan markers, affected learning
-events and questions, only include entries that are *already* orphaned,
+The orphan counts in a dry run, including faces and scan markers, only include
+entries that are *already* orphaned,
 not the ones the pending row deletions would create. The real run usually
 reclaims more than the preview suggests. Row counts are exact. The same lower
 bound applies to empty model databases: one whose only embeddings are about to

@@ -1,8 +1,6 @@
 {
   "resume": { "route": "/" },
   "faces": {
-    "learning": false,
-    "learningUpdates": false,
     "clustering": {
       "eps": 0.6,
       "min_cluster_size": 3,

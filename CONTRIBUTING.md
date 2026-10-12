@@ -61,8 +61,9 @@ Worth knowing before changing anything:
   <https://docs.videre.sh>.
 - **Anything two subcommands need belongs in `videre-core`.** Look there for an
   existing helper before adding one to a command module.
-- `CLAUDE.md` records the constraints and the measured findings behind the
-  defaults. Most surprising code has a reason written down there.
+- `CLAUDE.md` is a short guide for people and coding agents working on
+  videre: building, testing and getting a change in. Surprising code has its
+  reason in a comment beside it.
 
 macOS is the primary platform. Linux works with one gap: HEIC photos and video
 frames are decoded through a macOS system tool, so those files are skipped for

@@ -1,5 +1,5 @@
 use half::f16;
-use rusqlite::{Connection, OptionalExtension};
+use rusqlite::Connection;
 use std::collections::HashMap;
 
 #[derive(Clone)]
@@ -85,8 +85,6 @@ pub fn ensure_faces_schema(conn: &Connection) -> rusqlite::Result<()> {
 
 pub fn create_faces_table(conn: &Connection) -> rusqlite::Result<()> {
     ensure_faces_schema(conn)?;
-    crate::face_learning::ensure_profile_table(conn)?;
-    crate::face_learning::ensure_learning_tables(conn)?;
     // Writers migrate; readers do not. `open_wal` only creates the empty table,
     // because `stats` and `search` open databases they must not write to - a
     // read-only mount or another process holding the writer lock would turn a
@@ -125,7 +123,6 @@ pub struct OrphanFaceReport {
     pub faces: usize,
     pub labeled_faces: usize,
     pub scanned_hashes: usize,
-    pub learning: crate::face_learning::PrunedLearning,
 }
 
 /// Count only state that is orphaned in the current index. A caller planning
@@ -144,58 +141,15 @@ pub fn preview_orphan_face_state(conn: &Connection) -> anyhow::Result<OrphanFace
         [],
         |row| row.get(0),
     )?;
-    let events_invalidated: i64 = conn.query_row(
-        "SELECT count(*) FROM face_learning_events AS event
-         WHERE event.eligible = 1 AND EXISTS (
-             SELECT 1 FROM face_learning_event_faces AS source
-             WHERE source.event_id = event.id AND NOT EXISTS (
-                 SELECT 1 FROM faces AS face JOIN file_hashes AS file ON file.hash = face.hash
-                 WHERE face.id = source.face_id
-             )
-         )",
-        [],
-        |row| row.get(0),
-    )?;
-    let active_profile: Option<i64> = conn
-        .query_row(
-            "SELECT id FROM face_learning_profiles WHERE status='active'",
-            [],
-            |row| row.get(0),
-        )
-        .optional()?;
-    let questions_superseded: i64 = conn.query_row(
-        "SELECT count(*) FROM face_learning_questions AS question
-         WHERE question.status = 'pending' AND (
-             (?1 > 0 AND question.profile_id = ?2)
-             OR NOT EXISTS (
-                 SELECT 1 FROM faces AS face JOIN file_hashes AS file ON file.hash = face.hash
-                 WHERE face.id = question.representative_face_id
-             )
-             OR EXISTS (
-                 SELECT 1 FROM face_learning_question_faces AS source
-                 WHERE source.question_id = question.id AND NOT EXISTS (
-                     SELECT 1 FROM faces AS face JOIN file_hashes AS file ON file.hash = face.hash
-                     WHERE face.id = source.face_id
-                 )
-             )
-         )",
-        rusqlite::params![events_invalidated, active_profile],
-        |row| row.get(0),
-    )?;
     Ok(OrphanFaceReport {
         faces: usize::try_from(faces)?,
         labeled_faces: usize::try_from(labeled_faces)?,
         scanned_hashes: usize::try_from(scanned_hashes)?,
-        learning: crate::face_learning::PrunedLearning {
-            events_invalidated: usize::try_from(events_invalidated)?,
-            questions_superseded: usize::try_from(questions_superseded)?,
-            profile_retired: events_invalidated > 0 && active_profile.is_some(),
-        },
     })
 }
 
-/// Remove derived face state after file-row deletion, then reconcile retained
-/// learning history in the same transaction. A later prune can retry safely.
+/// Remove derived face state after file-row deletion, in one transaction. A
+/// later prune can retry safely.
 pub fn prune_orphan_face_state(conn: &Connection) -> anyhow::Result<OrphanFaceReport> {
     conn.execute_batch("BEGIN IMMEDIATE")?;
     let result = (|| -> anyhow::Result<OrphanFaceReport> {
@@ -210,12 +164,10 @@ pub fn prune_orphan_face_state(conn: &Connection) -> anyhow::Result<OrphanFaceRe
                  (SELECT 1 FROM file_hashes AS file WHERE file.hash = faces_scanned.hash)",
             [],
         )?;
-        let learning = crate::face_learning::reconcile_missing_face_sources_in_transaction(conn)?;
         Ok(OrphanFaceReport {
             faces,
             labeled_faces: preview.labeled_faces,
             scanned_hashes,
-            learning,
         })
     })();
     match result {
@@ -256,19 +208,16 @@ pub fn advance_recluster_watermark(conn: &Connection) -> anyhow::Result<()> {
 /// `videre faces --reset` escape hatch: after this, the next faces run
 /// starts from absolute beginning. The caller owns consent.
 /// What a face reset will delete, for the dry-run preview and the
-/// confirmation prompt. Learning state is named so consent covers it.
+/// confirmation prompt.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub struct FaceResetCounts {
     pub total_faces: usize,
     pub labeled_faces: usize,
     pub people: usize,
-    pub learning_events: usize,
-    pub questions: usize,
-    pub profiles: usize,
 }
 
-/// Counts everything `reset_all` clears. Missing optional tables count as
-/// zero, but a query error in an existing table must stop the reset.
+/// Counts everything `reset_all` clears. A missing table counts as zero, but
+/// a query error in an existing table must stop the reset.
 pub fn face_reset_counts(conn: &Connection) -> anyhow::Result<FaceResetCounts> {
     let count = |table: &str, sql: &str| -> anyhow::Result<usize> {
         if !crate::db::table_exists(conn, table)? {
@@ -284,18 +233,6 @@ pub fn face_reset_counts(conn: &Connection) -> anyhow::Result<FaceResetCounts> {
             "SELECT COUNT(*) FROM faces WHERE confirmed = 1 AND person_label IS NOT NULL",
         )?,
         people: count("people", "SELECT COUNT(*) FROM people")?,
-        learning_events: count(
-            "face_learning_events",
-            "SELECT COUNT(*) FROM face_learning_events",
-        )?,
-        questions: count(
-            "face_learning_questions",
-            "SELECT COUNT(*) FROM face_learning_questions",
-        )?,
-        profiles: count(
-            "face_learning_profiles",
-            "SELECT COUNT(*) FROM face_learning_profiles",
-        )?,
     })
 }
 
@@ -304,35 +241,11 @@ pub fn reset_all(conn: &Connection) -> anyhow::Result<()> {
     // never ran faces before.
     create_faces_table(conn)?;
     crate::decode_failures::ensure_table(conn)?;
-    crate::face_learning::ensure_learning_tables(conn)?;
-    crate::face_learning::ensure_profile_table(conn)?;
-    crate::face_learning::ensure_question_tables(conn)?;
     conn.execute_batch("BEGIN")?;
     let result = (|| -> anyhow::Result<()> {
         conn.execute("DELETE FROM faces", [])?;
         conn.execute("DELETE FROM people", [])?;
         conn.execute("DELETE FROM faces_scanned", [])?;
-        // The learning tables carry immutability triggers, so a reset drops
-        // and recreates them instead of deleting rows; the result is the same
-        // clean slate inside the same transaction.
-        conn.execute_batch(
-            "DROP TABLE face_learning_event_faces;
-             DROP TABLE face_learning_events;
-             DROP TABLE face_learning_question_faces;
-             DROP TABLE face_learning_questions;
-             DROP TABLE face_learning_profiles;",
-        )?;
-        crate::face_learning::ensure_learning_tables(conn)?;
-        crate::face_learning::ensure_profile_table(conn)?;
-        crate::face_learning::ensure_question_tables(conn)?;
-        // The state table itself survives the drop; restore its single row to
-        // the absolute beginning.
-        conn.execute(
-            "UPDATE face_learning_state SET generation = 0, trained_generation = 0,
-             status = 'current', training_generation = NULL, last_profile_id = NULL,
-             last_error = NULL WHERE id = 1",
-            [],
-        )?;
         crate::decode_failures::clear_stage(conn, crate::decode_failures::STAGE_FACES)?;
         crate::library_state::set(conn, crate::library_state::FACE_RECLUSTER_WATERMARK, 0)?;
         Ok(())
@@ -454,76 +367,11 @@ pub fn load_face_embeddings(conn: &Connection) -> rusqlite::Result<Vec<(i64, Vec
     Ok(out)
 }
 
-/// Load the complete, generic inputs used by face-learning feature extraction.
-/// Requested ids are deduplicated and rows are returned in ascending id order.
-/// Missing ids and malformed embedding blobs fail the whole load so a user
-/// action can roll back rather than silently lose its learning evidence.
-pub fn load_face_observations(
-    conn: &Connection,
-    face_ids: &[i64],
-) -> rusqlite::Result<Vec<crate::face_learning::FaceObservation>> {
-    use rusqlite::OptionalExtension;
-    use std::collections::BTreeSet;
-
-    let ids: BTreeSet<_> = face_ids.iter().copied().collect();
-    let mut statement = conn.prepare(
-        "SELECT embedding, bbox, landmark, blur, det_score, hash FROM faces WHERE id = ?1",
-    )?;
-    let mut observations = Vec::with_capacity(ids.len());
-    for id in ids {
-        let row = statement
-            .query_row([id], |row| {
-                Ok((
-                    row.get::<_, Vec<u8>>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, Option<String>>(2)?,
-                    row.get::<_, Option<f64>>(3)?,
-                    row.get::<_, Option<f64>>(4)?,
-                    row.get::<_, String>(5)?,
-                ))
-            })
-            .optional()?
-            .ok_or_else(|| {
-                rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(format!(
-                    "requested face {id} was not found"
-                ))))
-            })?;
-        let (blob, bbox, landmark, blur, det_score, photo_hash) = row;
-        if blob.len() % 2 != 0 {
-            return Err(rusqlite::Error::FromSqlConversionFailure(
-                blob.len(),
-                rusqlite::types::Type::Blob,
-                Box::new(std::io::Error::other(format!(
-                    "face {id} has a malformed embedding blob"
-                ))),
-            ));
-        }
-        let embedding = blob
-            .chunks_exact(2)
-            .map(|bytes| f16::from_le_bytes([bytes[0], bytes[1]]).to_f32())
-            .collect();
-        let landmark_residual = landmark
-            .as_deref()
-            .and_then(crate::face_learning::parse_landmarks)
-            .map(|points| crate::face_learning::landmark_residual(&points) as f64);
-        observations.push(crate::face_learning::FaceObservation {
-            face_id: id,
-            embedding,
-            bbox_min_side: bbox_min_side_option(&bbox).map(f64::from),
-            blur,
-            det_score,
-            landmark_residual,
-            photo_hash,
-        });
-    }
-    Ok(observations)
-}
-
 /// Loads confirmed person labels as evaluation truth without migrating or
 /// modifying face state.
 pub fn load_confirmed_face_labels(
     conn: &Connection,
-) -> rusqlite::Result<Vec<crate::face_learning::LabeledFace>> {
+) -> rusqlite::Result<Vec<crate::face_evaluation::LabeledFace>> {
     let mut stmt = conn.prepare(
         "SELECT id, person_label FROM faces
          WHERE confirmed = 1 AND person_label IS NOT NULL
@@ -531,7 +379,7 @@ pub fn load_confirmed_face_labels(
     )?;
     let labels = stmt
         .query_map([], |row| {
-            Ok(crate::face_learning::LabeledFace::new(
+            Ok(crate::face_evaluation::LabeledFace::new(
                 row.get::<_, i64>(0)?,
                 row.get::<_, String>(1)?,
             ))
@@ -670,20 +518,7 @@ mod tests {
     fn orphan_open() -> Connection {
         let conn = open();
         crate::library_db::ensure_scan_schema(&conn).unwrap();
-        crate::face_learning::ensure_question_tables(&conn).unwrap();
         conn
-    }
-
-    fn seed_orphan_event(conn: &Connection, face_id: i64) {
-        crate::face_learning::ensure_question_tables(conn).unwrap();
-        crate::face_learning::ensure_profile_table(conn).unwrap();
-        conn.execute(
-            "INSERT INTO face_learning_events
-             (action_kind,decision_kind,outcome,embedding_model_id,feature_schema_version,feature_snapshot_json,support_count)
-             VALUES('assign_face','membership','positive','test',1,'{}',0)",
-            [],
-        ).unwrap();
-        conn.execute("INSERT INTO face_learning_event_faces(event_id,face_id,role,ordinal) VALUES(1,?1,'subject',0)", [face_id]).unwrap();
     }
 
     #[test]
@@ -757,25 +592,7 @@ mod tests {
     }
 
     #[test]
-    fn sweep_reconciles_preexisting_missing_provenance() {
-        let conn = orphan_open();
-        seed_orphan_event(&conn, 77);
-        let report = prune_orphan_face_state(&conn).unwrap();
-        assert_eq!(report.faces, 0);
-        assert_eq!(report.learning.events_invalidated, 1);
-        assert_eq!(
-            conn.query_row(
-                "SELECT invalidation_reason FROM face_learning_events",
-                [],
-                |r| r.get::<_, String>(0)
-            )
-            .unwrap(),
-            "source_face_pruned"
-        );
-    }
-
-    #[test]
-    fn sweep_failure_rolls_back_face_and_learning_changes() {
+    fn sweep_failure_rolls_back_every_face_change() {
         let conn = orphan_open();
         conn.execute(
             "INSERT INTO faces(id,hash,bbox,embedding) VALUES(7,'lost','0,0,1,1',X'00')",
@@ -784,10 +601,11 @@ mod tests {
         .unwrap();
         conn.execute("INSERT INTO faces_scanned(hash) VALUES('lost')", [])
             .unwrap();
-        seed_orphan_event(&conn, 7);
+        // The marker delete runs after the face delete, so failing it shows
+        // the face delete rolled back with it.
         conn.execute_batch(
-            "CREATE TRIGGER abort_learning_change BEFORE UPDATE ON face_learning_state
-            BEGIN SELECT RAISE(ABORT, 'injected learning failure'); END;",
+            "CREATE TRIGGER abort_marker_delete BEFORE DELETE ON faces_scanned
+            BEGIN SELECT RAISE(ABORT, 'injected cleanup failure'); END;",
         )
         .unwrap();
         assert!(prune_orphan_face_state(&conn).is_err());
@@ -802,19 +620,7 @@ mod tests {
                 .unwrap(),
             1
         );
-        assert_eq!(
-            conn.query_row("SELECT eligible FROM face_learning_events", [], |r| r
-                .get::<_, i64>(0))
-                .unwrap(),
-            1
-        );
-        assert_eq!(
-            conn.query_row("SELECT generation FROM face_learning_state", [], |r| r
-                .get::<_, i64>(0))
-                .unwrap(),
-            0
-        );
-        conn.execute_batch("DROP TRIGGER abort_learning_change")
+        conn.execute_batch("DROP TRIGGER abort_marker_delete")
             .unwrap();
         assert_eq!(prune_orphan_face_state(&conn).unwrap().faces, 1);
     }
@@ -860,8 +666,8 @@ mod tests {
 
     fn open() -> Connection {
         let conn = Connection::open_in_memory().unwrap();
-        // Enforced, so the learning tables' declared parent keys are checked
-        // by every reset and lifecycle test.
+        // Enforced, so the people key is checked by every reset and lifecycle
+        // test.
         conn.execute_batch("PRAGMA foreign_keys = ON").unwrap();
         create_faces_table(&conn).unwrap();
         conn
@@ -894,27 +700,6 @@ mod tests {
     fn create_table_idempotent() {
         let conn = open();
         create_faces_table(&conn).unwrap();
-    }
-
-    #[test]
-    fn face_writer_setup_creates_learning_events_and_state() {
-        let conn = Connection::open_in_memory().unwrap();
-        create_faces_table(&conn).unwrap();
-        for table in [
-            "face_learning_events",
-            "face_learning_event_faces",
-            "face_learning_state",
-        ] {
-            let exists: bool = conn
-                .query_row(
-                    "SELECT EXISTS(SELECT 1 FROM sqlite_master
-                     WHERE type = 'table' AND name = ?1)",
-                    [table],
-                    |row| row.get(0),
-                )
-                .unwrap();
-            assert!(exists, "{table} was not created");
-        }
     }
 
     #[test]
@@ -1032,89 +817,28 @@ mod tests {
     }
 
     #[test]
-    fn reset_all_removes_face_learning_profiles() {
-        let conn = open();
-        conn.execute(
-            "INSERT INTO face_learning_profiles (
-                artifact_version, embedding_model_id, feature_schema_version,
-                model_kind, parameters, training_evidence_json,
-                validation_report_json, stage, status
-             ) VALUES (1, 'test', 1, 'test', X'00', '{}', '{}', 'shadow', 'candidate')",
-            [],
-        )
-        .unwrap();
-
-        reset_all(&conn).unwrap();
-
-        let count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM face_learning_profiles", [], |row| {
-                row.get(0)
-            })
-            .unwrap();
-        assert_eq!(count, 0);
-    }
-
-    #[test]
-    fn reset_counts_and_clears_every_learning_table() {
+    fn reset_counts_then_clears_faces_and_people() {
         let conn = open();
         conn.execute_batch(
-            "INSERT INTO people VALUES ('elena','Elena');
+            "INSERT INTO people (name, full_name) VALUES ('elif','Elif Çağlar');
              INSERT INTO faces (hash, bbox, embedding, cluster_id, confirmed, person_label)
-             VALUES ('h1', '0,0,50,50', X'3C00', NULL, 1, 'elena');
+             VALUES ('h1', '0,0,50,50', X'3C00', NULL, 1, 'elif');
              INSERT INTO faces_scanned (hash) VALUES ('h1');",
         )
         .unwrap();
-        crate::face_learning::ensure_learning_tables(&conn).unwrap();
-        crate::face_learning::ensure_profile_table(&conn).unwrap();
-        crate::face_learning::ensure_question_tables(&conn).unwrap();
-        conn.execute_batch(
-            "INSERT INTO face_learning_events (action_kind, decision_kind, outcome,
-                embedding_model_id, feature_schema_version, feature_snapshot_json, support_count)
-             VALUES ('assign_face','membership','positive','m/1',1,'{}',0);
-             INSERT INTO face_learning_event_faces (event_id, face_id, role, ordinal)
-             VALUES (1, 1, 'subject', 0);
-             INSERT INTO face_learning_profiles (
-                artifact_version, embedding_model_id, feature_schema_version, model_kind,
-                parameters, training_evidence_json, validation_report_json, stage, status)
-             VALUES (1,'m/1',1,'logistic',X'7B7D','{}','{}','suggestion','active');
-             INSERT INTO face_learning_questions (
-                status, target_identity, profile_id, model_kind, representative_face_id,
-                cluster_id, evidence_revision, evidence_json)
-             VALUES ('pending','elena',1,'logistic',1,1,'rev','{}');",
-        )
-        .unwrap();
-        conn.execute(
-            "UPDATE face_learning_state SET generation = 3, trained_generation = 2,
-             last_profile_id = 1",
-            [],
-        )
-        .unwrap();
-
         let counts = face_reset_counts(&conn).unwrap();
-        assert_eq!(counts.total_faces, 1);
-        assert_eq!(counts.labeled_faces, 1);
-        assert_eq!(counts.people, 1);
-        assert_eq!(counts.learning_events, 1);
-        assert_eq!(counts.questions, 1);
-        assert_eq!(counts.profiles, 1);
+        assert_eq!(
+            (counts.total_faces, counts.labeled_faces, counts.people),
+            (1, 1, 1)
+        );
 
         reset_all(&conn).unwrap();
         assert_eq!(
             face_reset_counts(&conn).unwrap(),
             FaceResetCounts::default()
         );
-        let state = crate::face_learning::learning_state(&conn).unwrap();
-        assert_eq!(state.generation, 0);
-        assert_eq!(state.trained_generation, 0);
-        assert_eq!(state.status, crate::face_learning::LearningStatus::Current);
-        assert_eq!(state.last_profile_id, None);
-
-        // Second reset on empty learning state is a no-op, not an error.
+        // A second reset on empty state is a no-op, not an error.
         reset_all(&conn).unwrap();
-        assert_eq!(
-            face_reset_counts(&conn).unwrap(),
-            FaceResetCounts::default()
-        );
     }
 
     #[test]
@@ -1138,21 +862,16 @@ mod tests {
              VALUES ('h1', '0,0,50,50', X'3C00', NULL, 1, 'elena');",
         )
         .unwrap();
-        crate::face_learning::ensure_learning_tables(&conn).unwrap();
-        crate::face_learning::ensure_profile_table(&conn).unwrap();
-        crate::face_learning::ensure_question_tables(&conn).unwrap();
         conn.execute_batch(
-            "INSERT INTO face_learning_events (action_kind, decision_kind, outcome,
-                embedding_model_id, feature_schema_version, feature_snapshot_json, support_count)
-             VALUES ('assign_face','membership','positive','m/1',1,'{}',0);
-             CREATE TRIGGER abort_face_wipe BEFORE DELETE ON faces
-             BEGIN SELECT RAISE(ABORT, 'injected wipe failure'); END;",
+            "CREATE TRIGGER abort_marker_wipe BEFORE DELETE ON faces_scanned
+             BEGIN SELECT RAISE(ABORT, 'injected wipe failure'); END;
+             INSERT INTO faces_scanned (hash) VALUES ('h1');",
         )
         .unwrap();
         assert!(reset_all(&conn).is_err());
         let counts = face_reset_counts(&conn).unwrap();
         assert_eq!(counts.total_faces, 1, "faces survive the failed reset");
-        assert_eq!(counts.learning_events, 1, "evidence survives too");
+        assert_eq!(counts.people, 1, "people survive too");
     }
 
     #[test]
@@ -1389,37 +1108,6 @@ mod tests {
     }
 
     #[test]
-    fn load_face_observations_is_ordered_complete_and_preserves_missing_quality() {
-        let conn = open();
-        let emb = make_embedding(&[1.0, 0.0]);
-        conn.execute(
-            "INSERT INTO faces
-             (id, hash, bbox, landmark, embedding, det_score, blur)
-             VALUES (2, 'h2', '0,0,40,25', NULL, ?1, NULL, NULL),
-                    (1, 'h1', '0,0,20,30',
-                     '38.2946,51.6963,73.5318,51.5014,56.0252,71.7366,41.5493,92.3655,70.7299,92.2041',
-                     ?1, 0.9, 200.0)",
-            [emb],
-        )
-        .unwrap();
-
-        let rows = load_face_observations(&conn, &[2, 1]).unwrap();
-        assert_eq!(
-            rows.iter().map(|row| row.face_id).collect::<Vec<_>>(),
-            vec![1, 2]
-        );
-        assert_eq!(rows[0].bbox_min_side, Some(20.0));
-        assert!(rows[0].landmark_residual.unwrap() < 1e-3);
-        assert_eq!(rows[1].bbox_min_side, Some(25.0));
-        assert_eq!(rows[1].blur, None);
-        assert_eq!(rows[1].det_score, None);
-        assert_eq!(rows[1].landmark_residual, None);
-
-        let error = load_face_observations(&conn, &[1, 3]).unwrap_err();
-        assert!(error.to_string().contains("requested face 3 was not found"));
-    }
-
-    #[test]
     fn load_confirmed_face_labels_returns_only_ordered_truth_without_mutation() {
         let conn = open();
         seed_person(&conn, "zoe");
@@ -1457,8 +1145,8 @@ mod tests {
         assert_eq!(
             labels,
             vec![
-                crate::face_learning::LabeledFace::new(1, "İpek"),
-                crate::face_learning::LabeledFace::new(2, "zoe"),
+                crate::face_evaluation::LabeledFace::new(1, "İpek"),
+                crate::face_evaluation::LabeledFace::new(2, "zoe"),
             ]
         );
         let after: Vec<(i64, Option<i64>, Option<String>, i64)> = conn

@@ -339,7 +339,7 @@ fn silent_hides_progress_but_never_a_warning() {
     assert!(out.status.success());
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        stderr.contains("warning: --xmp newest is not yet implemented"),
+        stderr.contains("warning: --xmp newest behaves as db"),
         "{stderr}"
     );
     assert!(parsed_lines(&logs(&lib).join("scan.log"))

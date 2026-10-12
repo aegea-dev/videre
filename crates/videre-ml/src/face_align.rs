@@ -1,6 +1,6 @@
 use image::{DynamicImage, Rgb, RgbImage};
-use videre_core::face_learning::ARCFACE_LANDMARK_TEMPLATE as DST;
-pub use videre_core::face_learning::{
+use videre_core::face_landmarks::ARCFACE_LANDMARK_TEMPLATE as DST;
+pub use videre_core::face_landmarks::{
     landmark_residual, landmark_similarity_transform as umeyama, parse_landmarks,
 };
 

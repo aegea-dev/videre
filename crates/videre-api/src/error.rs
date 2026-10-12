@@ -36,38 +36,8 @@ impl From<anyhow::Error> for Error {
     }
 }
 
-impl From<videre_core::face_learning::FeatureError> for Error {
-    fn from(e: videre_core::face_learning::FeatureError) -> Self {
-        Error::Other(e.to_string())
-    }
-}
-
-impl From<videre_core::face_learning::LearningEventError> for Error {
-    fn from(e: videre_core::face_learning::LearningEventError) -> Self {
-        Error::Other(e.to_string())
-    }
-}
-
 impl From<serde_json::Error> for Error {
     fn from(e: serde_json::Error) -> Self {
-        Error::Other(e.to_string())
-    }
-}
-
-impl From<videre_core::face_learning::ProfileError> for Error {
-    fn from(e: videre_core::face_learning::ProfileError) -> Self {
-        Error::Other(e.to_string())
-    }
-}
-
-impl From<videre_core::face_learning::TrainingError> for Error {
-    fn from(e: videre_core::face_learning::TrainingError) -> Self {
-        Error::Other(e.to_string())
-    }
-}
-
-impl From<videre_core::face_learning::QuestionError> for Error {
-    fn from(e: videre_core::face_learning::QuestionError) -> Self {
         Error::Other(e.to_string())
     }
 }

@@ -6,9 +6,9 @@ description: Browse your whole library in a local web UI, with every file, dupli
 Starts a small web server on your own machine and opens your library in a
 browser. Nothing is uploaded. Browsing only reads the database `videre scan`
 built (previews may populate the derived thumbnail cache); the library changes
-only through what you do on the page: naming people, marking and liking photos,
-and face-learning answers are saved to the library database, and rotating a
-photo updates its orientation in the file itself.
+only through what you do on the page: naming people and marking and liking
+photos are saved to the library database, and rotating a photo updates its
+orientation in the file itself.
 
 ```bash
 videre gallery                  # http://127.0.0.1:7878
@@ -125,12 +125,10 @@ stays visible even when a file has none of the people or location data yet.
 | `/map/location/berlin?at=52.52,13.405&radius=0.2` | A street group: a small circle inside a city |
 | `/events` | Substantial travel trips inferred from capture dates and photo locations; click one to see its media |
 | `/events/<time>-<hash>` | One trip's media, keyed by its first photo anchor's time and full content hash, such as `/events/20200312T100000-` followed by the 64-character hash |
-| `/smart` | Reserved, not built yet |
 
 **Library**, **Duplicates**, **Date**, **Events**, **People** and **Map** sit in a strip along
 the top of every page, so you switch between them without touching the address
-bar. The reserved routes are deliberately not in it; each one appears when it
-renders something.
+bar.
 
 Each section's toolbar sits under the strip and stays there as you scroll. It
 reads, left to right: **View**, **Sort**, then a **search and filter** box
@@ -273,7 +271,7 @@ videre config set street-detail false
 
 turns it off and deletes the downloaded map.
 
-The Events view currently finds travel trips, not ordinary local outings. It
+The Events view finds travel trips, not ordinary local outings. It
 infers home from the place with the most assignable media in your library, then
 looks for substantial activity in another place. A short trip needs at least
 ten distinct media files in a rolling three-hour window, which may cross
@@ -284,8 +282,7 @@ separate candidate and must qualify on its own; a home photo or more than 72
 hours between destination photo anchors also ends a trip. A place group's
 observed footprint can be compact or reach up to 20 km from its fixed center.
 A group overlapping home is
-not treated as travel. The ten-item, three-hour, and 20 km values are initial
-defaults; a later Gallery configuration will make them editable.
+not treated as travel. The ten-item, three-hour and 20 km values are fixed.
 
 Photos with valid GPS and a full embedded capture date establish the trip.
 Dated videos and GPS-less photos can join when nearby photo and location
@@ -298,10 +295,9 @@ Each card shows an offline place-based title, date range and file count; click
 it to see exactly the included files. If the evidence is too thin, Events
 explains why instead of showing one-file cards.
 
-Local outings near home, such as a museum opening, and manual add/remove of
-trip files are planned for later iterations. A later iteration will also let
-you combine events into a curated event and organize their media together. An
-automatic trip can miss files without strong time or place evidence, and a
+Events finds travel only: an outing near home, such as a museum opening, is
+not an event, and a trip's files cannot be edited by hand or combined with
+another trip. An automatic trip can miss files without strong time or place evidence, and a
 heavily photographed second routine area can look like a destination until home
 correction is available.
 
@@ -342,8 +338,6 @@ These are the defaults every library starts from:
 {
   "resume": { "route": "/" },
   "faces": {
-    "learning": false,
-    "learningUpdates": false,
     "clustering": {
       "eps": 0.6,
       "min_cluster_size": 3,
@@ -380,8 +374,6 @@ These are the defaults every library starts from:
 | Setting | Values | What it does |
 |---|---|---|
 | `resume.route` | a page path | The page the gallery reopens at. Saved as you move around; see below |
-| `faces.learning` | `true`, `false` | Whether face learning runs for this library; see [Face learning](#face-learning) |
-| `faces.learningUpdates` | `true`, `false` | Whether the People page shows face learning's status strip and teaching notes, while learning is on |
 | `faces.clustering.*` | see [Recluster](#recluster) | The face grouping parameters the People page's **Recluster** saves; `videre faces` and watch use them too |
 | `routes.files.view` | `tile`, `list` | The file view on the Library, Date, Events and Map grids |
 | `routes.files.pageSize` | a whole number, 1 to 500 | How many files the Library and Map grids load at a time, and with each **Show more** |
@@ -423,12 +415,12 @@ bar opens a menu: **Help** opens this page in a new tab, **Feedback** the
 
 - **Library config** edits every [`videre config`](/commands/config/) key.
 - **Gallery** edits the settings above, grouped by the page they belong to:
-  People, for example, holds face learning, the clustering parameters and the
-  people layout.
+  People, for example, holds the clustering parameters and the people
+  layout.
 - **Gallery Import/Export** can:
   - **Export settings** to `videre-gallery-settings.json`: the `routes` and
-    `faces` sections, so the page settings and the face learning and
-    clustering settings. The page a library reopens at belongs to that
+    `faces` sections, so the page settings and the face clustering
+    settings. The page a library reopens at belongs to that
     library, and the library config is not included.
   - **Import settings** from such a file, into this or any other library. A
     file with only `routes`, exported by an earlier version, leaves the face
@@ -495,9 +487,8 @@ it, exactly as with [`videre mark`](/commands/mark/) and
 [`videre tag`](/commands/tag/). Delete moves **every copy** of each selected
 item to the Trash (the confirmation counts them), each with its XMP sidecar,
 and nothing of them is left behind: their marks, tags, faces, embeddings and
-thumbnails go at once, as [`videre prune`](/commands/prune/) would remove them.
-Face-learning evidence that depended on those faces is withdrawn, while the
-historical journal and person names are kept. A Delete is undone with
+thumbnails go at once, as [`videre prune`](/commands/prune/) would remove them;
+person names are kept. A Delete is undone with
 [`videre dedupe undo`](/commands/dedupe/#undoing-a-trash-run), which puts back
 the most recent trash run, from the gallery or from `dedupe trash`; watch then
 processes the restored files again, as new ones. It waits until no other videre command or
@@ -529,58 +520,7 @@ page keeps its own Sort by control.
 | `--port <PORT>` | Port to listen on. Omitted: start at 7878 and advance to the next free port if taken. Given: use exactly that port (fails if busy); `0` lets the OS choose |
 | `--browse` | Open a browser once the server is listening, at the page you last visited in this library |
 
-## Face learning
-
-Face learning is **off by default**. Turn it on for a library in
-`.videre/gallery.json`:
-
-```json
-{ "faces": { "learning": true } }
-```
-
-Off, naming, moving and dissolving work exactly the same but record no
-teaching evidence, no training runs, and the People page asks no identity
-questions. Evidence recorded while it was on is kept, and training resumes
-from it when it is turned back on. The change applies without restarting the
-gallery.
-
-When on, the People page teaches the gallery: naming clusters, moving faces, and
-dissolving bad groups write durable teaching evidence where there is a
-comparison to record (an action with nothing to compare against records
-none), and a background worker turns that evidence into small interpretable
-scorers. Once a scorer passes the
-shipped gates, the People page asks bounded yes/no identity questions.
-Answering Yes names a cluster; No only teaches; Skip does neither.
-
-- The status strip and the teaching notes after each action are hidden by
-  default: they describe the process, not a result, so they stay out of the
-  way. Set `"learningUpdates": true` beside `"learning"` to see them. The
-  status is also machine-readable at
-  `GET /api/face-learning/status`, and training outcomes (promoted,
-  rejected with the check it missed, waiting for feedback) go to the gallery
-  log at the `info` level. Identity questions show either way: they are the
-  result.
-- Training runs in the background on its own database connection, ten
-  seconds after the last teaching action, so browsing and naming never wait
-  for it.
-- The Recluster row (below) says in one line what learning contributes right
-  now: which profile suggests names, or that it is not used yet and why.
-- Training needs both kinds of feedback: faces that belong together (naming
-  people) and groups that are wrong (dissolving a cluster). Until there is
-  enough of each, the page shows what it is waiting for, such as *dissolve 2
-  more wrong clusters* or *name 1 more person from a group of two or more
-  faces*, rather than a failure. A person named from a single face counts as
-  a name but teaches nothing yet (there is no second face to compare it
-  with), so it does not start a new run; naming a group, or adding a face to
-  someone already named, does. After an upgrade, the gallery also tries once
-  more when it starts, since a newer videre may train on the same feedback.
-- Every action's evidence stays inspectable (per person, and in the teaching
-  journal), and no raw embeddings ever appear in a payload.
-- Failed runs keep the previous profile. Promotion affects suggestions and
-  questions only; grouping comes from the clustering values below.
-  `videre faces --reset` wipes all of it.
-
-### Recluster
+## Recluster
 
 **Recluster** in the People toolbar opens a form with the grouping values of
 [`videre faces`](/commands/faces/#clustering-parameters), one per line:
@@ -594,9 +534,7 @@ anything runs.
 - **Preview** computes the grouping those values would produce and changes
   nothing: how many groups, from how many unnamed faces, how many stay single
   and how many the quality gates held out, next to the current numbers.
-- **Apply** regroups the unnamed faces and refreshes the identity questions,
-  so faces that now sit in a group can be asked about. Named faces never
-  move. It saves the values that differ from the defaults to
+- **Apply** regroups the unnamed faces. Named faces never move. It saves the values that differ from the defaults to
   `.videre/gallery.json`, and from then on `videre faces` and `videre watch`
   group this library with them (a `videre faces` flag still wins for that
   run).

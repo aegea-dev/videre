@@ -23,33 +23,6 @@ async function openLibrary(libraryRoot: string): Promise<Db | undefined> {
   return db;
 }
 
-test("face learning is off by default and turned on in gallery.json", async ({ page, isolatedGallery: gallery }) => {
-  // With no faces the page shows the empty state, strip included.
-  seedFace(gallery.libraryRoot);
-  const learningCalls: string[] = [];
-  page.on("request", (r) => {
-    if (r.url().includes("/api/face-learning/")) learningCalls.push(r.url());
-  });
-  await page.goto(`${gallery.baseURL}/people`);
-  // No learning control in the toolbar, in any state.
-  await expect(page.locator(".gallery-toolbar").first()).not.toContainText("Learning");
-  await page.waitForTimeout(500);
-  await expect(page.locator("#learning-strip")).toBeHidden();
-  await page.goto(`${gallery.baseURL}/people/person/nobody`);
-  await page.waitForTimeout(300);
-  expect(learningCalls, "no learning request while learning is off").toHaveLength(0);
-
-  const r = await page.request.patch(`${gallery.baseURL}/api/settings`, {
-    headers: { "content-type": "application/merge-patch+json" },
-    data: JSON.stringify({ faces: { learning: true, learningUpdates: true } })
-  });
-  expect(r.ok()).toBeTruthy();
-  await page.goto(`${gallery.baseURL}/people`);
-  await expect(page.locator("#learning-strip")).toBeVisible();
-  expect(learningCalls.length).toBeGreaterThan(0);
-  await expect(page.locator(".gallery-toolbar").first()).not.toContainText("Learning");
-});
-
 test("recluster previews without writing and applies from the toolbar", async ({ page, gallery }) => {
   const db = await openLibrary(gallery.libraryRoot);
   test.skip(!db, "node:sqlite is unavailable on this Node");
@@ -73,8 +46,6 @@ test("recluster previews without writing and applies from the toolbar", async ({
     await page.locator("#recluster-toggle").click();
     await expect(row).toBeVisible();
     await expect(page.locator('#recluster-row input[data-param="eps"]')).toHaveValue("0.6");
-    // Learning is off by default, so the row says nothing about it.
-    await expect(page.locator("#recluster-learning")).toHaveText("");
 
     await page.locator("#recluster-preview").click();
     await expect(page.locator("#recluster-result")).toContainText("Preview: 1 group from 3 of 4 unnamed faces");
@@ -349,7 +320,7 @@ test("the quality gates in More hold out tiny and blurred faces", async ({ page,
   );
 });
 
-test("apply regroups, keeps named faces, saves, and re-reads the learning line", async ({
+test("apply regroups, keeps named faces, and saves", async ({
   page,
   isolatedGallery: gallery
 }) => {
@@ -358,13 +329,7 @@ test("apply regroups, keeps named faces, saves, and re-reads the learning line",
     ...group("c", [0, 1], 2),
     { hash: "named", vector: [1], label: "Ayşe" }
   ]);
-  const settings = await page.request.patch(`${gallery.baseURL}/api/settings`, {
-    headers: { "content-type": "application/merge-patch+json" },
-    data: JSON.stringify({ faces: { learning: true } })
-  });
-  expect(settings.ok()).toBeTruthy();
   await openRow(page, gallery.baseURL);
-  await expect(page.locator("#recluster-learning")).not.toHaveText("");
 
   // The toggle closes and reopens the row; Defaults refills an edited field.
   await page.locator("#rc-eps").fill("0.4");
@@ -379,14 +344,9 @@ test("apply regroups, keeps named faces, saves, and re-reads the learning line",
   await expect(page.locator("#recluster-row")).toBeVisible();
   await expect(page.locator("#rc-eps")).toHaveValue("0.6");
 
-  const reads: string[] = [];
-  page.on("request", (q) => {
-    if (q.url().includes("/api/faces/cluster-params")) reads.push(q.url());
-  });
   await page.locator("#rc-min-size").fill("2");
   await page.locator("#recluster-apply").click();
   await expect(page.locator("#recluster-result")).toContainText("Applied: 2 groups from 5 of 5 unnamed faces");
-  await expect.poll(() => reads.length, { message: "the learning line is re-read after Apply" }).toBeGreaterThan(0);
 
   const db = openLibraryDb(gallery.libraryRoot);
   const named = db.prepare("SELECT confirmed, person_label, cluster_id FROM faces WHERE hash = 'named'").get();

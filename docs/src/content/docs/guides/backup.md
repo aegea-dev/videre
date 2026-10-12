@@ -29,7 +29,7 @@ backing up):
 ```
 .videre/hashes.db          # the database: names, faces, scan rows, everything
 .videre/config.toml        # small, and annoying to reconstruct
-.videre/gallery.json       # gallery settings, face learning and clustering
+.videre/gallery.json       # gallery settings and face clustering
 .videre/embeddings/        # optional, saves hours of recompute
 ```
 

@@ -2,7 +2,7 @@ use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::time::Instant;
-use videre_core::face_learning::{
+use videre_core::face_evaluation::{
     evaluate_candidate, CandidatePredictions, ClusterPrediction, DatasetEvaluation,
     EvaluationError, EVALUATION_PROTOCOL_VERSION,
 };
@@ -111,7 +111,7 @@ mod tests {
     use super::*;
     use half::f16;
     use rusqlite::{params, Connection};
-    use videre_core::face_learning::{EvaluationError, EVALUATION_PROTOCOL_VERSION};
+    use videre_core::face_evaluation::{EvaluationError, EVALUATION_PROTOCOL_VERSION};
 
     fn parameters() -> ClusteringParameters {
         ClusteringParameters {
