@@ -19,10 +19,12 @@ update the relevant page under `docs/src/content/docs/` in the same commit.
   (`Özgür`, `Işıl`, `Gökçe`), not `Alice` and `Bob`.
 - **New settings** go in `config.toml` (`videre config set`), never a new
   environment variable.
-- **Dependencies are pinned exactly** (`=x.y.z`) to the version in
-  `Cargo.lock`, so `cargo install` builds what was tested. To update one,
-  change its pin in every crate that uses it, then `cargo update -p <name>`.
-  A pin does not reach the dependencies of our dependencies, so the
+- **Dependencies take patch releases only** (`~x.y.z`), so `cargo install`
+  gets fixes but never a new minor version. A prerelease (`ort`) and our own
+  crates are pinned exactly (`=`), since a prerelease range accepts every
+  later rc. To move one, change it in every crate that uses it, then
+  `cargo update -p <name>`. Nothing pins the dependencies of our
+  dependencies, so the
   **Unlocked build** workflow deletes `Cargo.lock` and checks the binary, on
   every change and daily. When it fails and everything else passes, a
   dependency's new release has broken `cargo install videre`: users can
