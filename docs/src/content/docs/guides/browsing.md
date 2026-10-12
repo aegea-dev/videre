@@ -168,7 +168,9 @@ so a photo deleted outside videre appears until its row is removed by
 the database, which an exported file does not have. Without embeddings,
 `gallery` still serves every view and says so rather than failing.
 
-The **Similar** button on a card ranks the whole library against that photo. The
+The **Similar** button on a card or in the lightbox ranks the whole library
+against that photo and opens the ranking as a page of its own, with a **Back**
+link to where you pressed it. The
 server does the ranking, so it works at any library size, and the page never
 downloads a vector. It appears only once the library has embeddings; with none
 there is nothing to rank against, so the button is omitted rather than shown and

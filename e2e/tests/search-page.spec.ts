@@ -21,14 +21,9 @@ function rankedNames(page: Page) {
 test("Similar opens as a page that a bookmark reopens", async ({ page, searchGallery }) => {
   await preferListView(searchGallery);
   await page.goto(searchGallery.baseURL);
-  await page.locator("#gallery .card", { hasText: "çiçek.jpg" }).locator(".similar-btn").click();
-  const open = page.locator("#results .results-head a", { hasText: "Open as a page" });
-  await expect(open).toBeVisible();
   const hash = await hashOf(page, searchGallery, "çiçek.jpg");
-  await expect(open).toHaveAttribute("href", `/search?like=${hash}`);
-
-  await open.click();
-  await expect(page).toHaveURL(`${searchGallery.baseURL}/search?like=${hash}`);
+  await page.locator("#gallery .card", { hasText: "çiçek.jpg" }).locator(".similar-btn").click();
+  await expect(page).toHaveURL(`${searchGallery.baseURL}/search?like=${hash}&from=%2F`);
   await expect(page.locator("#search-head")).toContainText("Similar to çiçek.jpg");
   await expect(rankedNames(page)).toHaveText(["bahçe.jpg", "deniz.jpg"]);
   await expect(page.locator("#gallery .card .score").first()).toBeVisible();
