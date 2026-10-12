@@ -17,9 +17,8 @@ A local-first tool for making sense of a folder full of photos and videos.
 - search your photos by describing them, like "sunset over water" or "my red car",
   and narrow the results in the same query by person, place and radius, date
   range, category, media type, rating, like or tag
-- recognise faces, group them automatically, and search by person, with a face
-  engine that learns from your corrections and asks short yes/no questions to
-  finish naming groups
+- recognise faces, group them automatically, and search by person, with a strong
+  face engine
 - import from Google Takeout, Apple Photos, or a Lightroom catalog
 - browse it all in `videre gallery`, a local web UI with every file, duplicate
   review, a date drill-down, face clusters and people, a map view, and automatic
@@ -74,10 +73,8 @@ what's there. Stop using it and your photos are exactly as they were.
   *could* go and stops there. You decide, and you can look through the
   candidates in a browser first.
 - **Naming faces is bulk work, not a chore.** videre groups faces together
-  itself, so you name one group of 40 photos rather than tagging 40 photos. The
-  gallery learns from each correction and asks "Is this Elena?" about groups it
-  has become confident about, so one click names the next group. A face you
-  named never moves on its own.
+  itself, so you name one group of 40 photos rather than tagging 40 photos. A
+  face you named never moves on its own.
 - **A gallery when you want one, not a server you keep.** `videre gallery`
   starts a local web UI for browsing, reviewing duplicates, naming people,
   exploring the map and reliving events by time and place. Stop it with Ctrl-C
