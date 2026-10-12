@@ -40,11 +40,12 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 /// Schema 3 introduced the metadata-independent content key. Version 4 makes
-/// face IDs monotonic so retained learning provenance cannot refer to a
-/// different face after pruning. Version 5 adds the resolved capture date
-/// (`capture_date`, `date_source`) and where a row's GPS came from
-/// (`gps_source`), in place.
-const SCHEMA_VERSION: i64 = 6;
+/// face IDs monotonic, so a face ID is never reused. Version 5 adds the
+/// resolved capture date (`capture_date`, `date_source`) and where a row's GPS
+/// came from (`gps_source`), in place. Version 6 marks whether the stored size
+/// is the displayed one (`dims_oriented`). Version 7 drops face learning,
+/// which left videre.
+const SCHEMA_VERSION: i64 = 7;
 
 /// How long every open waits for a concurrent writer before failing, so two
 /// videre processes on one library surface as a bounded error rather than
@@ -124,11 +125,6 @@ const REQUIRED_TABLES: &[&str] = &[
     "classifications",
     "location_clusters",
     "pipeline_runs",
-    "face_learning_events",
-    "face_learning_event_faces",
-    "face_learning_profiles",
-    "face_learning_questions",
-    "face_learning_question_faces",
 ];
 
 /// Sequence counter making the build temporary's name unique within a
@@ -263,22 +259,6 @@ fn verify_foreign_keys(conn: &Connection) -> Result<()> {
             "RESTRICT",
             "RESTRICT",
         ),
-        (
-            "face_learning_event_faces",
-            "event_id",
-            "face_learning_events",
-            "id",
-            "NO ACTION",
-            "NO ACTION",
-        ),
-        (
-            "face_learning_question_faces",
-            "question_id",
-            "face_learning_questions",
-            "id",
-            "NO ACTION",
-            "NO ACTION",
-        ),
     ] {
         let sql = format!("PRAGMA foreign_key_list({child})");
         let mut stmt = conn.prepare(&sql)?;
@@ -340,9 +320,6 @@ fn prepare_schema(conn: &Connection) -> Result<()> {
     crate::location_cluster::ensure_location_clusters_table(conn)?;
     crate::pipeline_runs::ensure_pipeline_runs_table(conn)?;
     crate::decode_failures::ensure_table(conn)?;
-    crate::face_learning::ensure_learning_tables(conn)?;
-    crate::face_learning::ensure_profile_table(conn)?;
-    crate::face_learning::ensure_question_tables(conn)?;
     verify_schema(conn)?;
     Ok(())
 }
@@ -355,9 +332,10 @@ fn user_version(conn: &Connection) -> Result<i64> {
     Ok(version)
 }
 
-/// Rebuild the only table whose row-ID policy changes. Historical journal and
-/// question references deliberately have no face FK, so reserve their maximum
-/// too. A failed copy or FK check rolls the entire version change back.
+/// Rebuild the only table whose row-ID policy changes. The face-learning
+/// journal and questions a schema 3 library may hold reference face IDs with
+/// no foreign key, so their maximum is reserved too. A failed copy or FK check
+/// rolls the entire version change back.
 fn upgrade_v3_to_v4(conn: &Connection) -> Result<()> {
     conn.execute_batch("BEGIN IMMEDIATE")?;
     let result = (|| -> Result<()> {
@@ -365,14 +343,19 @@ fn upgrade_v3_to_v4(conn: &Connection) -> Result<()> {
             user_version(conn)? == 3,
             "expected schema 3 for face ID upgrade"
         );
+        let mut sources = vec!["SELECT id FROM faces".to_string()];
+        for (table, column) in [
+            ("face_learning_event_faces", "face_id"),
+            ("face_learning_question_faces", "face_id"),
+            ("face_learning_questions", "representative_face_id"),
+        ] {
+            if crate::db::table_exists(conn, table)? {
+                sources.push(format!("SELECT {column} FROM {table}"));
+            }
+        }
         let max_id: i64 = conn
             .query_row(
-                "SELECT MAX(id) FROM (
-                SELECT id FROM faces
-                UNION ALL SELECT face_id FROM face_learning_event_faces
-                UNION ALL SELECT face_id FROM face_learning_question_faces
-                UNION ALL SELECT representative_face_id FROM face_learning_questions
-             )",
+                &format!("SELECT MAX(id) FROM ({})", sources.join(" UNION ALL ")),
                 [],
                 |row| row.get::<_, Option<i64>>(0),
             )?
@@ -391,7 +374,6 @@ fn upgrade_v3_to_v4(conn: &Connection) -> Result<()> {
             [max_id],
         )?;
         conn.execute("INSERT INTO sqlite_sequence(name,seq) SELECT 'faces',?1 WHERE NOT EXISTS (SELECT 1 FROM sqlite_sequence WHERE name='faces')", [max_id])?;
-        crate::face_learning::ensure_profile_table(conn)?;
         let violations: i64 =
             conn.query_row("SELECT count(*) FROM pragma_foreign_key_check", [], |row| {
                 row.get(0)
@@ -470,6 +452,38 @@ fn upgrade_v5_to_v6(conn: &Connection) -> Result<()> {
     }
 }
 
+/// Drop face learning, which left videre. Its tables are dropped children
+/// first, and their triggers go with them.
+fn upgrade_v6_to_v7(conn: &Connection) -> Result<()> {
+    conn.execute_batch("BEGIN IMMEDIATE")?;
+    let result = (|| -> Result<()> {
+        anyhow::ensure!(
+            user_version(conn)? == 6,
+            "expected schema 6 to drop face learning"
+        );
+        conn.execute_batch(
+            "DROP TABLE IF EXISTS face_learning_event_faces;
+             DROP TABLE IF EXISTS face_learning_events;
+             DROP TABLE IF EXISTS face_learning_question_faces;
+             DROP TABLE IF EXISTS face_learning_questions;
+             DROP TABLE IF EXISTS face_learning_profiles;
+             DROP TABLE IF EXISTS face_learning_state;",
+        )?;
+        conn.pragma_update(None, "user_version", 7)?;
+        Ok(())
+    })();
+    match result {
+        Ok(()) => {
+            conn.execute_batch("COMMIT")?;
+            Ok(())
+        }
+        Err(e) => {
+            let _ = conn.execute_batch("ROLLBACK");
+            Err(e)
+        }
+    }
+}
+
 /// Every in-place upgrade from `version` to the current schema, in order.
 fn upgrade_from(conn: &Connection) -> Result<()> {
     if user_version(conn)? == 3 {
@@ -480,6 +494,9 @@ fn upgrade_from(conn: &Connection) -> Result<()> {
     }
     if user_version(conn)? == 5 {
         upgrade_v5_to_v6(conn)?;
+    }
+    if user_version(conn)? == 6 {
+        upgrade_v6_to_v7(conn)?;
     }
     Ok(())
 }
@@ -496,8 +513,8 @@ fn upgradable(version: i64) -> bool {
 /// :warning: Asked of SQLite, never read through a `std::fs::File`. POSIX
 /// record locks belong to the process, so closing *any* descriptor on the
 /// database drops every SQLite lock the process holds on it. The gallery keeps
-/// a connection open for its lifetime and opens the library again (recluster,
-/// learning); a header read there cost the gallery its locks, the next other
+/// a connection open for its lifetime and opens the library again
+/// (recluster); a header read there cost the gallery its locks, the next other
 /// process to close the library took itself for the last user and deleted the
 /// WAL under it, and the gallery read a frozen snapshot from then on, writing
 /// into a WAL no longer on disk. SQLite's own closes wait for the process's
@@ -1053,6 +1070,7 @@ mod tests {
     use crate::db::enable_foreign_keys;
 
     fn make_v3(conn: &Connection) {
+        conn.execute_batch(LEARNING_TABLES_V6).unwrap();
         conn.execute_batch("DROP TABLE faces;").unwrap();
         let ddl = crate::face_db::faces_ddl_for("faces", false)
             .replace("INTEGER PRIMARY KEY AUTOINCREMENT", "INTEGER PRIMARY KEY");
@@ -1069,15 +1087,11 @@ mod tests {
             "INSERT INTO people(name,full_name) VALUES('isil','Işıl');
              INSERT INTO faces(id,hash,bbox,embedding,person_label,confirmed)
                  VALUES(7,'h','0,0,1,1',X'00','isil',1);
-             INSERT INTO face_learning_events
-                 (id,action_kind,decision_kind,outcome,embedding_model_id,feature_schema_version,feature_snapshot_json,support_count)
-                 VALUES(1,'assign','user','accepted','test',1,'{}',0);
-             INSERT INTO face_learning_event_faces(event_id,face_id,role,ordinal)
-                 VALUES(1,80,'subject',0);
-             INSERT INTO face_learning_questions
-                 (id,status,target_identity,profile_id,model_kind,representative_face_id,cluster_id,evidence_revision,evidence_json)
-                 VALUES(1,'pending','isil',1,'test',90,1,'rev','{}');",
-        ).unwrap();
+             INSERT INTO face_learning_events(id,outcome) VALUES(1,'accepted');
+             INSERT INTO face_learning_event_faces(event_id,face_id) VALUES(1,80);
+             INSERT INTO face_learning_questions(id,representative_face_id) VALUES(1,90);",
+        )
+        .unwrap();
         drop(conn);
 
         let conn = open_existing(&ctx).unwrap();
@@ -1173,11 +1187,84 @@ mod tests {
         );
     }
 
+    /// The face-learning tables a schema 6 library carried, in the shape that
+    /// matters here: their names, the references between them, and a row
+    /// that points at a face id.
+    const LEARNING_TABLES_V6: &str = "
+        CREATE TABLE face_learning_events (id INTEGER PRIMARY KEY, outcome TEXT);
+        CREATE TABLE face_learning_event_faces (
+            event_id INTEGER NOT NULL REFERENCES face_learning_events(id),
+            face_id INTEGER NOT NULL);
+        CREATE TABLE face_learning_state (id INTEGER PRIMARY KEY, generation INTEGER);
+        CREATE TABLE face_learning_profiles (id INTEGER PRIMARY KEY, status TEXT);
+        CREATE TABLE face_learning_questions (
+            id INTEGER PRIMARY KEY, representative_face_id INTEGER NOT NULL);
+        CREATE TABLE face_learning_question_faces (
+            question_id INTEGER NOT NULL REFERENCES face_learning_questions(id),
+            face_id INTEGER NOT NULL);
+        CREATE TRIGGER face_learning_events_immutable_delete
+            BEFORE DELETE ON face_learning_events
+            BEGIN SELECT RAISE(ABORT, 'immutable'); END;";
+
+    /// A schema 6 library: the face-learning tables schema 7 dropped are back.
+    fn make_v6(conn: &Connection) {
+        conn.execute_batch(LEARNING_TABLES_V6).unwrap();
+        conn.pragma_update(None, "user_version", 6).unwrap();
+    }
+
     /// A schema 5 library: the column schema 6 added is dropped again.
     fn make_v5(conn: &Connection) {
+        make_v6(conn);
         conn.execute_batch("ALTER TABLE file_hashes DROP COLUMN dims_oriented;")
             .unwrap();
         conn.pragma_update(None, "user_version", 5).unwrap();
+    }
+
+    /// Schema 7 drops face learning, which left videre, in place: every
+    /// learning table and its triggers go, everything else stays.
+    #[test]
+    fn v6_upgrade_drops_face_learning_and_keeps_everything_else() {
+        let (_temp, ctx) = library();
+        let conn = initialize(&ctx).unwrap();
+        make_v6(&conn);
+        conn.execute_batch(
+            "INSERT INTO people(name,full_name) VALUES('gokce','Gökçe');
+             INSERT INTO faces(hash,bbox,embedding,person_label,confirmed)
+                 VALUES('hçiçek','0,0,1,1',X'00','gokce',1);
+             INSERT INTO face_learning_events(id,outcome) VALUES(1,'positive');
+             INSERT INTO face_learning_event_faces(event_id,face_id) VALUES(1,1);
+             INSERT INTO face_learning_state(id,generation) VALUES(1,4);",
+        )
+        .unwrap();
+        drop(conn);
+
+        let conn = open_existing(&ctx).unwrap();
+        assert_eq!(user_version(&conn).unwrap(), SCHEMA_VERSION);
+        let left: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE name LIKE 'face_learning%'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(left, 0, "a learning table or trigger survived");
+        let named: String = conn
+            .query_row("SELECT person_label FROM faces", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(named, "gokce");
+    }
+
+    #[test]
+    fn read_only_v6_refuses_without_writing() {
+        let (_temp, ctx) = library();
+        let conn = initialize(&ctx).unwrap();
+        make_v6(&conn);
+        conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)")
+            .unwrap();
+        drop(conn);
+        let before = std::fs::read(&ctx.paths.db).unwrap();
+        assert!(open_existing_read_only(&ctx).is_err());
+        assert_eq!(std::fs::read(&ctx.paths.db).unwrap(), before);
     }
 
     /// A schema 4 library: the date columns schema 5 added are dropped again.

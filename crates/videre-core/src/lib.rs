@@ -12,7 +12,6 @@ pub mod face_cluster;
 pub mod face_db;
 pub mod face_evaluation;
 pub mod face_landmarks;
-pub mod face_learning;
 pub mod face_match;
 pub mod fix_dates_target;
 pub mod geocode;
