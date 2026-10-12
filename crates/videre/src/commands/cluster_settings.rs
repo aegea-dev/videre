@@ -202,8 +202,6 @@ mod tests {
     #[test]
     fn saved_fields_apply_one_by_one() {
         let s = from_settings(&json!({ "faces": {
-                "learning": true,
-                "learningUpdates": false,
                 "clustering": { "eps": 0.7, "min_cluster_size": 2 }
             } }));
         assert!(s.warnings.is_empty(), "{:?}", s.warnings);
