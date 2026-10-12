@@ -138,8 +138,12 @@ puts the binary and how to remove each one properly.
 Needs a Rust toolchain.
 
 ```bash
-cargo install videre
+cargo install videre --locked
 ```
+
+`--locked` builds with the exact dependency versions videre was released and
+tested with. Without it, cargo picks the newest versions it is allowed, and a
+dependency's later release can stop videre from compiling.
 
 ```bash
 git clone git@github.com:erhangundogan/videre.git
@@ -151,7 +155,7 @@ On ARM64 Linux, *building from source* needs one extra flag. The released
 binary does not, since it is already built with it:
 
 ```bash
-RUSTFLAGS="-C target-feature=+fp16" cargo install videre
+RUSTFLAGS="-C target-feature=+fp16" cargo install videre --locked
 ```
 
 Without it the build fails with `error: instruction requires: fullfp16`. This

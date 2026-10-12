@@ -105,7 +105,7 @@ and put it on your `PATH`. No Rust toolchain needed, nothing to compile.
 Or build it yourself, which needs Rust:
 
 ```bash
-cargo install videre
+cargo install videre --locked
 ```
 
 **If you previously ran `cargo install videre`**, that copy lives in

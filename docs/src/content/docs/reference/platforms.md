@@ -53,7 +53,7 @@ Building from source needs one extra flag. The released binary does not, since
 it is already built with it:
 
 ```bash
-RUSTFLAGS="-C target-feature=+fp16" cargo install videre
+RUSTFLAGS="-C target-feature=+fp16" cargo install videre --locked
 ```
 
 Without it the build fails with `instruction requires: fullfp16`. Building from
