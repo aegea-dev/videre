@@ -125,12 +125,10 @@ stays visible even when a file has none of the people or location data yet.
 | `/map/location/berlin?at=52.52,13.405&radius=0.2` | A street group: a small circle inside a city |
 | `/events` | Substantial travel trips inferred from capture dates and photo locations; click one to see its media |
 | `/events/<time>-<hash>` | One trip's media, keyed by its first photo anchor's time and full content hash, such as `/events/20200312T100000-` followed by the 64-character hash |
-| `/smart` | Reserved, not built yet |
 
 **Library**, **Duplicates**, **Date**, **Events**, **People** and **Map** sit in a strip along
 the top of every page, so you switch between them without touching the address
-bar. The reserved routes are deliberately not in it; each one appears when it
-renders something.
+bar.
 
 Each section's toolbar sits under the strip and stays there as you scroll. It
 reads, left to right: **View**, **Sort**, then a **search and filter** box
@@ -271,7 +269,7 @@ videre config set street-detail false
 
 turns it off and deletes the downloaded map.
 
-The Events view currently finds travel trips, not ordinary local outings. It
+The Events view finds travel trips, not ordinary local outings. It
 infers home from the place with the most assignable media in your library, then
 looks for substantial activity in another place. A short trip needs at least
 ten distinct media files in a rolling three-hour window, which may cross
@@ -282,8 +280,7 @@ separate candidate and must qualify on its own; a home photo or more than 72
 hours between destination photo anchors also ends a trip. A place group's
 observed footprint can be compact or reach up to 20 km from its fixed center.
 A group overlapping home is
-not treated as travel. The ten-item, three-hour, and 20 km values are initial
-defaults; a later Gallery configuration will make them editable.
+not treated as travel. The ten-item, three-hour and 20 km values are fixed.
 
 Photos with valid GPS and a full embedded capture date establish the trip.
 Dated videos and GPS-less photos can join when nearby photo and location
@@ -296,10 +293,9 @@ Each card shows an offline place-based title, date range and file count; click
 it to see exactly the included files. If the evidence is too thin, Events
 explains why instead of showing one-file cards.
 
-Local outings near home, such as a museum opening, and manual add/remove of
-trip files are planned for later iterations. A later iteration will also let
-you combine events into a curated event and organize their media together. An
-automatic trip can miss files without strong time or place evidence, and a
+Events finds travel only: an outing near home, such as a museum opening, is
+not an event, and a trip's files cannot be edited by hand or combined with
+another trip. An automatic trip can miss files without strong time or place evidence, and a
 heavily photographed second routine area can look like a destination until home
 correction is available.
 

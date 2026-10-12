@@ -72,11 +72,6 @@ videre import --originals ~/somewhere/photos ~/Pictures/Odd.photoslibrary
 | `--silent` | No per-file output. Errors always show |
 | `--json` | One JSON summary object on stdout |
 
-:::caution[`--into` is accepted but not implemented yet]
-Copying into a clean destination tree is designed but not built. Passing
-`--into` exits with a message rather than silently ignoring it.
-:::
-
 ## Then scan, then fix-dates
 
 ```bash

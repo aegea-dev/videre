@@ -85,7 +85,7 @@ empty library.
 
 | Flag | Effect |
 |---|---|
-| `--xmp` | Write XMP sidecars (currently the only export format; required) |
+| `--xmp` | Write XMP sidecars (the only export format; required) |
 | `--dry-run` | List the sidecars that would be written, write nothing |
 | `--library <dir>` | Select a different library instead of the [current directory](/commands/config/) |
 | `--silent` | Suppress the summary line |

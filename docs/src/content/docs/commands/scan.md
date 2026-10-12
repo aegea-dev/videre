@@ -115,7 +115,7 @@ option controls how ratings and labels are reconciled with database values:
 |---|---|
 | `db` | Database values win. XMP fills missing values |
 | `file` | XMP values win |
-| `newest` | Reserved for timestamp comparison; currently behaves as `db` with a warning |
+| `newest` | Behaves as `db`, with a warning |
 
 The local default is configured with:
 

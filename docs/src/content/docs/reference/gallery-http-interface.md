@@ -50,7 +50,6 @@ and cannot answer these HTTP requests after the command exits.
 | `GET /settings/{tab}` | The settings pages: `config`, `gallery`, or `manage` (gallery import, export and reset) |
 | `GET /diagnostics` | Redirects to `/diagnostics/status` |
 | `GET /diagnostics/{tab}` | The Diagnostics pages: `status`, `stats`, or `logs` |
-| `GET /smart` | Reserved |
 
 Date route segments are zero-padded where applicable: `YYYY`, `YYYY/MM` and
 `YYYY/MM/DD`. Invalid date routes return `404 Not Found`.
@@ -71,9 +70,6 @@ query dates or empty ranges return `400 Bad Request`.
 curl "http://127.0.0.1:7878/date/2025/06/03"
 curl "http://127.0.0.1:7878/date?from=2016-05&to=2017"
 ```
-
-The reserved `/smart` route currently returns a placeholder page with
-`404 Not Found`.
 
 Map location names use the same normalized, URL-safe identity rule as people.
 When more than one cluster has the same normalized name, the route selects the
@@ -464,13 +460,13 @@ dated, located photos. A multi-day trip needs ten files and at least two such
 photo anchors on each of two dates. Local stops within one 20 km place group can
 merge. A stop outside that radius starts a separate candidate trip that must
 qualify independently; a home photo or a gap over 72 hours between destination
-photo anchors also ends a trip. The ten-file, three-hour, and 20 km values are
-initial defaults for a future editable Gallery configuration. Videos may join a photo-established trip
+photo anchors also ends a trip. The ten-file, three-hour and 20 km values are
+fixed. Videos may join a photo-established trip
 but never anchor one; GPS-less media join only with supporting capture-time and
 location evidence. Only full stored capture dates count. Filesystem modification
 times are not used for Events.
 
-Each `kind` is currently `trip`. `key` is the first destination photo anchor's
+Each `kind` is `trip`. `key` is the first destination photo anchor's
 `%Y%m%dT%H%M%S` wall-clock time, a hyphen and its full content hash; adding an
 edge file cannot rename the trip. `title` uses the dominant stop's offline
 place name, or falls back to `Trip, March 2020`. `place` is the full offline
@@ -478,7 +474,7 @@ name or `null`. The `empty_reason` field is `null` when trips are present; for
 an empty list it is one of `no_media`, `no_capture_dates`,
 `insufficient_location_evidence` or `no_qualifying_trips`. No prior
 `videre locations` or `videre embed` run is needed. Local outings, manual
-membership edits, and combining events are not supported in this iteration.
+membership edits and combining events are not supported.
 
 ```bash
 curl "http://127.0.0.1:7878/api/events"

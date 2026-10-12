@@ -25,10 +25,6 @@ pub struct ImportArgs {
     #[arg(long)]
     use_library_db: bool,
 
-    /// Copy into this tree instead of editing in place
-    #[arg(long)]
-    into: Option<PathBuf>,
-
     /// Proceed without prompting when the library looks optimised (Apple only)
     #[arg(long)]
     allow_partial: bool,
@@ -75,14 +71,6 @@ pub(crate) struct Summary {
 }
 
 pub fn run(args: ImportArgs, ctx: &CommandContext) -> anyhow::Result<()> {
-    if let Some(into) = &args.into {
-        anyhow::bail!(
-            "--into ({}) is not implemented yet; import works in place. Copy \
-             the files yourself, then run 'videre import' on the copy.",
-            ctx.operand(into).display()
-        );
-    }
-
     // A relative provider path is invocation-relative, like any explicit file
     // operand; bare discovery searches the selected library root.
     let targets = match &args.path {

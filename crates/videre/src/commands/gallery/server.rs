@@ -3147,20 +3147,6 @@ async fn handle_search(
     Ok(json_response(out))
 }
 
-/// Reserved so the shape of the command is visible before the views exist.
-async fn handle_not_yet() -> impl axum::response::IntoResponse {
-    (
-        StatusCode::NOT_FOUND,
-        axum::response::Html(
-            "<!DOCTYPE html><html><head><meta charset=\"UTF-8\"><title>videre</title></head>\
-             <body style=\"font-family:-apple-system,sans-serif;padding:48px\">\
-             <h1>Not built yet</h1>\
-             <p>This view is reserved. See <a href=\"/\">all files</a>.</p>\
-             </body></html>",
-        ),
-    )
-}
-
 /// Which sections a live page renders is a property of the route, not of the
 /// server, so `/` and `/date` can differ within one `gallery`.
 ///
@@ -5843,8 +5829,7 @@ async fn serve_faces_async(
         .route("/diagnostics", get(handle_diagnostics_root))
         .route("/diagnostics/{tab}", get(handle_diagnostics_page))
         .route("/events/{key}", get(handle_events_key))
-        .route("/events", get(handle_events))
-        .route("/smart", get(handle_not_yet));
+        .route("/events", get(handle_events));
 
     let app = router
         .layer(axum::middleware::from_fn(log_rejections))

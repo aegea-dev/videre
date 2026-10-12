@@ -1318,8 +1318,8 @@ version number and are released together.
   work: reconstructable decision evidence with versioned schemas,
   identity-held-out validation folds, Wilson-bound suggestion gates,
   fail-closed profile promotion with atomic activation, and frozen-dataset
-  comparison. These are plumbing for upcoming quality improvements; nothing
-  in this release changes grouping behavior for labeled faces.
+  comparison. Nothing in this release changes grouping behavior for labeled
+  faces.
 
 
 ## [0.35.0] - 2026-09-21
@@ -2012,7 +2012,7 @@ version number and are released together.
 ### Notes
 
 - A tag is one flat string; hierarchical keywords (`lr:hierarchicalSubject`) are
-  not modelled yet, and gallery tag filtering is not built yet.
+  not modelled, and the gallery does not filter by tag.
 
 ## [0.21.2] - 2026-08-26
 

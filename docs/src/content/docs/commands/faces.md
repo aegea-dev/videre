@@ -413,7 +413,7 @@ The `--xmp` flag decides who wins when both carry a name:
 |---|---|
 | `db` (default) | The database wins: imported names fill only faces you have not already named |
 | `file` | The sidecar wins: an imported name replaces an existing one |
-| `newest` | Reserved; currently behaves as `db` |
+| `newest` | Behaves as `db`, with a warning |
 
 The default comes from the `xmp_precedence` config key (see
 [`videre config`](/commands/config/)), the same setting `scan` uses for ratings.

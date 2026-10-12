@@ -11,10 +11,6 @@
    labeling-only server has no `/date` or `/`. Every route linked here exists
    only under `videre gallery`, which routes all three together.
 
-   :warning: The reserved route `/smart` is deliberately absent. It answers
-   404 "Not built yet", and a link to that is worse than no link. Add it here
-   when it renders.
-
    The gallery settings (`commands/gallery/settings.rs`) are emitted first and
    outside the nav condition, so every page that includes this file, a static
    export too, has them before its own scripts run. #}

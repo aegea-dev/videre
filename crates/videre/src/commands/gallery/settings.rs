@@ -662,6 +662,7 @@ mod tests {
                 "duplicates": {"kinds": ["exact", "benzer"]},
                 "people": {"align": "right"}
             },
+            // A key this version no longer has is ignored, like any unknown one.
             "faces": {"learning": "evet", "clustering": {"eps": 2.5}},
             "kendi": {"anahtarı": true}
         });

@@ -288,7 +288,7 @@ fn the_date_page_does_not_carry_the_library() {
 /// groups it came to 297 KB and passed, which would have recorded the fault as
 /// fixed while it was only small.
 #[test]
-#[ignore = "/duplicates inlines its groups; the paged endpoint is not built yet"]
+#[ignore = "/duplicates inlines its groups"]
 fn the_duplicates_page_does_not_carry_the_library() {
     assert_under_ceiling("/duplicates");
 }

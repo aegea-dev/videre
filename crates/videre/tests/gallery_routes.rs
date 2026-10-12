@@ -723,27 +723,6 @@ fn live_date_pages_link_the_drill_down_routes() {
     assert!(body.contains("level='day'"));
 }
 
-// :warning: The reserved views answer **404 with a page**, which is deliberate
-// and easy to mistake for a bug. The status says the view does not exist yet;
-// the body says so in words and links back. Registering them is what makes the
-// intended shape visible in the router.
-//
-// The pair of tests below is the point: a reserved route and a typo both return
-// 404, so only the body tells them apart. Asserting the status alone would pass
-// even if `/map` were deleted from the router entirely.
-#[test]
-fn a_reserved_route_returns_404_with_an_explanation() {
-    let lib = fixture();
-    let server = Server::start(&lib);
-
-    let (status, body) = server.get("/smart");
-    assert_eq!(status, 404, "/smart should report that it is not built yet");
-    assert!(
-        body.contains("Not built yet"),
-        "/smart 404s without saying it is reserved, so it reads as a missing route"
-    );
-}
-
 #[test]
 fn map_route_renders_with_nav_marked_and_grid_rows() {
     let lib = fixture();
@@ -788,19 +767,6 @@ fn map_route_on_a_library_that_never_ran_locations_shows_the_empty_state() {
     assert!(
         body.contains("Run <code>videre locations</code>"),
         "the empty state must name the command"
-    );
-}
-
-#[test]
-fn an_unregistered_path_404s_with_no_such_explanation() {
-    let lib = fixture();
-    let server = Server::start(&lib);
-
-    let (status, body) = server.get("/definitely-not-a-route");
-    assert_eq!(status, 404);
-    assert!(
-        !body.contains("Not built yet"),
-        "an unrouted path must not look like a reserved view"
     );
 }
 
