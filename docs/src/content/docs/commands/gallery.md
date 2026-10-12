@@ -73,8 +73,11 @@ Once the lightbox is open, move through the items without closing it: the
 on-screen arrows at the left and right edges, or the **Left** and **Right**
 arrow keys, step to the previous and next item. Stepping past the last loaded
 item pulls in the next page automatically and keeps going, so **Show more** is
-not needed to browse to the end. At the item's top-right corner sit up to three
-buttons: **Rotate** (photos only) turns the image 90 degrees by editing its
+not needed to browse to the end. At the item's top-right corner sit up to four
+buttons: **Similar** (once `videre embed` has run) closes the lightbox and
+shows the photos that look most like this one on the Library page, as a
+card's **Similar** button does, opening Library first from any other page;
+**Rotate** (photos only) turns the image 90 degrees by editing its
 orientation in place, never re-encoding the pixels, and turns the photo's face
 boxes with it so face crops stay on their faces; **Fullscreen** blows the whole lightbox up to
 the screen, arrows and info panel included (the same button, or **Escape**,

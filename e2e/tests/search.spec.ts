@@ -106,3 +106,39 @@ test("a failed search says so and closes", async ({ page, searchGallery }) => {
   await results.locator(".results-head button", { hasText: "Close" }).click();
   await expect(results).toBeHidden();
 });
+
+test("the lightbox's Similar closes it and ranks like the list's button", async ({ page, searchGallery }) => {
+  await preferListView(searchGallery);
+  await page.goto(searchGallery.baseURL);
+  const card = page.locator("#gallery .card", { hasText: "çiçek.jpg" });
+  await card.locator("[data-lb-url]").first().click();
+  await expect(page.locator("#lb")).toHaveClass(/on/);
+  await page.locator("#lb-similar").click();
+
+  await expect(page.locator("#lb")).not.toHaveClass(/on/);
+  await expect(page.locator("#results .results-head h2")).toHaveText("Similar images");
+  await expect(page.locator("#results .rcard.query .rname")).toHaveText("query: çiçek.jpg");
+  await expect(resultNames(page)).toHaveText(["bahçe.jpg", "deniz.jpg"]);
+  // Already on Library, so it stays there.
+  await expect(page).toHaveURL(`${searchGallery.baseURL}/`);
+});
+
+test("the lightbox's Similar on another page opens Library with the results", async ({ page, searchGallery }) => {
+  await preferListView(searchGallery);
+  const cicek = await hashOf(page, searchGallery, "çiçek.jpg");
+  const deniz = await hashOf(page, searchGallery, "deniz.jpg");
+  await page.goto(`${searchGallery.baseURL}/search?like=${deniz}`);
+  const card = page.locator("#gallery .card", { hasText: "çiçek.jpg" });
+  await card.locator("[data-lb-url]").first().click();
+  await expect(page.locator("#lb")).toHaveClass(/on/);
+  await page.locator("#lb-similar").click();
+
+  await expect(page).toHaveURL(`${searchGallery.baseURL}/?similar=${cicek}`);
+  const results = page.locator("#results");
+  await expect(results.locator(".results-head h2")).toHaveText("Similar images");
+  await expect(resultNames(page)).toHaveText(["bahçe.jpg", "deniz.jpg"]);
+
+  // Closing the strip drops it from the address, so a reload does not reopen it.
+  await results.locator(".results-head button", { hasText: "Close" }).click();
+  await expect(page).toHaveURL(`${searchGallery.baseURL}/`);
+});

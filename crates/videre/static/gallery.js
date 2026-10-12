@@ -519,6 +519,8 @@ function openLb(url,type,metaJson){
     if(b){ b.hidden=!canRotate; b.disabled=false; }
   });
   lbCurrent = { hash: meta&&meta.hash, url: url };
+  var sim=document.getElementById('lb-similar');
+  if(sim)sim.hidden=!(lbCurrent.hash&&similarAvailable());
   // A fresh image starts fit-to-screen at the preview resolution; the full-res
   // original is loaded lazily on the first zoom.
   lbz={scale:1,x:0,y:0,full:false};
@@ -1406,11 +1408,14 @@ function humanDate(s){
 // used to appear only when the page had downloaded every vector, which switched
 // it off for exactly the libraries big enough to want it. A static export has
 // no server to ask, so it has no button.
-function similarBtn(hash){
-  if(typeof LIVE_SERVER==='undefined'||!LIVE_SERVER)return '';
+function similarAvailable(){
+  if(typeof LIVE_SERVER==='undefined'||!LIVE_SERVER)return false;
   // The Similar search ranks against embeddings; with none, it can only fail,
   // so offer no button rather than one that returns "Search failed".
-  if(typeof HAS_EMBEDDINGS!=='undefined'&&!HAS_EMBEDDINGS)return '';
+  return typeof HAS_EMBEDDINGS==='undefined'||!!HAS_EMBEDDINGS;
+}
+function similarBtn(hash){
+  if(!similarAvailable())return '';
   // Results draw into #results (Files and Map); a page without it would
   // throw on the answer, so it offers no button.
   if(!document.getElementById('results'))return '';
@@ -1743,6 +1748,23 @@ function clearResults(){
   var panel=document.getElementById('results');
   panel.style.display='none';
   panel.innerHTML='';
+  // A strip opened by ?similar= closes for good: a reload must not reopen it.
+  var p=new URLSearchParams(location.search);
+  if(p.has('similar')){
+    p.delete('similar');
+    var rest=p.toString();
+    history.replaceState(null,'',location.pathname+(rest?'?'+rest:''));
+  }
+}
+// The lightbox's Similar does what a card's Similar button does, from any
+// page: Library draws the results in place, and every other page opens
+// Library with them, since that is where they belong.
+function lbSimilar(){
+  var hash=lbCurrent&&lbCurrent.hash;
+  if(!hash)return;
+  closeLb();
+  if(location.pathname==='/'&&document.getElementById('results'))findSimilar(hash);
+  else location.href='/?similar='+encodeURIComponent(hash);
 }
 // The nav search box submits to `/?q=`; the Files page reads it here and ranks
 // the library semantically through the same /api/search endpoint the Similar
@@ -1809,6 +1831,8 @@ if(typeof ALLFILES!=='undefined'){
   // load (or its plot fails), so gallery.js must not also fire an initial fetch.
   // A search's own page ranks rather than lists.
   if(location.pathname==='/search')runSearchPage(); else renderGallery();
+  var similarParam=location.pathname==='/'&&new URLSearchParams(location.search).get('similar');
+  if(similarParam)findSimilar(similarParam);
 }
 document.addEventListener('click',function(e){
   var sb=e.target.closest('[data-similar]');
