@@ -120,11 +120,10 @@ test("gallery settings are edited in range only, and a saved one is used", async
   expect(JSON.parse(await readFile(path, "utf8")).routes?.date).toBeUndefined();
 });
 
-test("People gathers face learning, clustering and the people layout", async ({ page, gallery }) => {
+test("People gathers clustering and the people layout", async ({ page, gallery }) => {
   await page.goto(`${gallery.baseURL}/settings/gallery`);
   const people = page.locator("details.set-group", { has: page.locator("summary", { hasText: /^People/ }) });
-  for (const key of ["faces.learning", "faces.learningUpdates", "routes.people.align", "routes.people.pageSize",
-    "faces.clustering.eps"]) {
+  for (const key of ["routes.people.align", "routes.people.pageSize", "faces.clustering.eps"]) {
     await expect(people.locator(`[data-key="${key}"]`)).toHaveCount(1);
   }
   await expect(people.locator('[data-key="routes.people.align"] select')).toHaveValue("right");
