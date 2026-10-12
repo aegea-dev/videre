@@ -16,6 +16,28 @@ version number and are released together.
 ## [Unreleased]
 
 
+## [0.63.2] - 2026-10-12
+
+### Fixed
+
+- **`cargo install videre` compiles again.** A new release of the ONNX
+  Runtime binding (`ort` 2.0.0-rc.14) changed its API, and `cargo install`,
+  which picks the newest versions allowed rather than the tested ones,
+  failed to build every published videre. Every direct dependency is now
+  pinned to the exact version videre is tested with.
+
+### Changed
+
+- The install instructions say `cargo install videre --locked`, which also
+  fixes the versions of videre's dependencies' own dependencies.
+
+### Upgrading
+
+- **For crates depending on `videre`, `videre-core`, `videre-api` or
+  `videre-ml`:** their dependencies are pinned exactly (`=x.y.z`), including
+  their requirements on each other, so a project sharing a dependency with
+  them needs the same version of it.
+
 ## [0.63.1] - 2026-10-12
 
 ### Changed
@@ -3415,7 +3437,8 @@ takes the model id explicitly instead of reading it from the environment.
   skip it rather than failing.
 - First release published to crates.io.
 
-[Unreleased]: https://github.com/erhangundogan/videre/compare/v0.63.1...HEAD
+[Unreleased]: https://github.com/erhangundogan/videre/compare/v0.63.2...HEAD
+[0.63.2]: https://github.com/erhangundogan/videre/compare/v0.63.1...v0.63.2
 [0.63.1]: https://github.com/erhangundogan/videre/compare/v0.63.0...v0.63.1
 [0.63.0]: https://github.com/erhangundogan/videre/compare/v0.62.0...v0.63.0
 [0.62.0]: https://github.com/erhangundogan/videre/compare/v0.61.0...v0.62.0
