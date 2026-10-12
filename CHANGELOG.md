@@ -16,6 +16,51 @@ version number and are released together.
 ## [Unreleased]
 
 
+## [0.63.0] - 2026-10-12
+
+### Changed
+
+- **Date cards show their period's files.** A year card showed one file;
+  year, month and day cards now tile up to 20, 12 and 6 of their period's
+  files, photos first, in a frame of one size per level, so a year with
+  few files is as tall as a full one. The frame sizes are set in
+  `gallery.json` (`routes.date.year`, `.month` and `.day`, each with a
+  `width` and `height`). The pick is random and holds for the day.
+- **The Map and Date pages leave their own column out of the filter
+  panel.** The Map is already a place and the Date page already a date;
+  typing `place:` or `after:` still works.
+- **Face learning is removed.** The experimental feature that learned from
+  naming decisions is gone, with its gallery strip, identity questions,
+  person-page history, `/api/face-learning/*` endpoints and the
+  `faces.learning` and `faces.learningUpdates` settings (a `gallery.json`
+  that still sets them is ignored). Naming in the gallery keeps the rules
+  it had with learning off. `faces --reset` and `prune` no longer count
+  learning state.
+- `import` loses its unimplemented `--into` flag, and the gallery its
+  reserved `/smart` route.
+
+### Fixed
+
+- **The gallery keeps the HEIC tiles it converts.** Tiles ask for a size
+  `watch` does not cache, and the gallery did not keep its own conversion,
+  so every HEIC tile paid a QuickLook conversion on every visit (about
+  0.44 s each). A second visit now loads them from the cache.
+
+### Upgrading
+
+- **The library schema is now 7.** The first time this version opens a
+  library it drops face learning's tables in place, which needs every other
+  videre command in that library stopped (the gallery and its watch
+  included). Faces and names are kept. Earlier versions cannot open a
+  library after the upgrade.
+- **For crates depending on `videre-core`:** `face_learning` is removed;
+  the landmark geometry moves to `face_landmarks` and the clustering
+  evaluation to `face_evaluation`.
+- **For crates depending on `videre-api`:** every `*_with_learning`
+  function and the face learning types are removed; `assign_to_person` is
+  new, and `new_person`, `remove_face` and `dissolve_cluster` apply the
+  gallery's naming rules.
+
 ## [0.62.0] - 2026-10-11
 
 ### Changed
@@ -3350,7 +3395,8 @@ takes the model id explicitly instead of reading it from the environment.
   skip it rather than failing.
 - First release published to crates.io.
 
-[Unreleased]: https://github.com/erhangundogan/videre/compare/v0.62.0...HEAD
+[Unreleased]: https://github.com/erhangundogan/videre/compare/v0.63.0...HEAD
+[0.63.0]: https://github.com/erhangundogan/videre/compare/v0.62.0...v0.63.0
 [0.62.0]: https://github.com/erhangundogan/videre/compare/v0.61.0...v0.62.0
 [0.61.0]: https://github.com/erhangundogan/videre/compare/v0.60.0...v0.61.0
 [0.60.0]: https://github.com/erhangundogan/videre/compare/v0.59.0...v0.60.0
