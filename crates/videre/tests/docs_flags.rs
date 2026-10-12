@@ -33,6 +33,10 @@ const HIDDEN_ALIASES: [(&str, &str); 1] = [("faces", "--reprocess")];
 /// program's command line, so `videre --help` will never list them.
 const INSTALLER_FLAGS: [&str; 4] = ["--uninstall", "--to", "--release", "--version"];
 
+/// Flags of **cargo**, in the `cargo install videre --locked` the install pages
+/// show; like the installer's, another program's command line.
+const CARGO_FLAGS: [&str; 1] = ["--locked"];
+
 /// Every `.md` under the docs tree, not just `commands/`.
 ///
 /// :warning: The per-command check below only reads `commands/`, which left the
@@ -283,6 +287,7 @@ fn no_page_anywhere_names_a_flag_that_does_not_exist() {
     let mut anywhere: BTreeSet<String> = cmds.iter().flat_map(|c| flags(&help_for(c))).collect();
     anywhere.extend(HIDDEN_ALIASES.iter().map(|(_, f)| f.to_string()));
     anywhere.extend(INSTALLER_FLAGS.iter().map(|f| f.to_string()));
+    anywhere.extend(CARGO_FLAGS.iter().map(|f| f.to_string()));
 
     let mut findings = Vec::new();
     for page in all_docs_pages() {

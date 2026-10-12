@@ -19,6 +19,9 @@ update the relevant page under `docs/src/content/docs/` in the same commit.
   (`Özgür`, `Işıl`, `Gökçe`), not `Alice` and `Bob`.
 - **New settings** go in `config.toml` (`videre config set`), never a new
   environment variable.
+- **Dependencies are pinned exactly** (`=x.y.z`) to the version in
+  `Cargo.lock`, so `cargo install` builds what was tested. To update one,
+  change its pin in every crate that uses it, then `cargo update -p <name>`.
 - **Every operation leaves the library consistent on its own.** A command or
   gallery action that changes a file or a row also invalidates everything
   derived from it (rows, embeddings, thumbnails) before it returns.
