@@ -16,6 +16,26 @@ version number and are released together.
 ## [Unreleased]
 
 
+## [0.63.1] - 2026-10-12
+
+### Changed
+
+- **Similar opens its results as a page.** Every **Similar** button opens
+  the ranking as a full grid with paging (`/search?like=`) instead of a
+  one-row strip, keeping the query's filters, with a **Back** link to the
+  page it was pressed on. The Date page's cards offer it too.
+- **The lightbox has a Similar button** beside rotate, fullscreen and close,
+  once the library has embeddings.
+- The README and the docs front page no longer describe face learning,
+  which 0.63.0 removed.
+- The release notes and the Homebrew caveats give the default search
+  model's real download size, about 1.5 GB.
+
+### Fixed
+
+- `quinn-proto` is locked at 0.11.19 for RUSTSEC-2026-0338, -0340 and
+  -0343. It is listed in the lock file but not built into videre.
+
 ## [0.63.0] - 2026-10-12
 
 ### Changed
@@ -3395,7 +3415,8 @@ takes the model id explicitly instead of reading it from the environment.
   skip it rather than failing.
 - First release published to crates.io.
 
-[Unreleased]: https://github.com/erhangundogan/videre/compare/v0.63.0...HEAD
+[Unreleased]: https://github.com/erhangundogan/videre/compare/v0.63.1...HEAD
+[0.63.1]: https://github.com/erhangundogan/videre/compare/v0.63.0...v0.63.1
 [0.63.0]: https://github.com/erhangundogan/videre/compare/v0.62.0...v0.63.0
 [0.62.0]: https://github.com/erhangundogan/videre/compare/v0.61.0...v0.62.0
 [0.61.0]: https://github.com/erhangundogan/videre/compare/v0.60.0...v0.61.0
