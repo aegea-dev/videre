@@ -236,12 +236,13 @@ test("clicking the lightbox image zooms it and toggles back to fit", async ({ pa
 test("rotate is offered for photos, rotates, and is hidden for video", async ({ page, gallery }) => {
   await page.goto(gallery.baseURL);
 
-  // A photo: controls in order rotate-ccw, rotate-cw, fullscreen, close.
+  // A photo: controls in order similar, rotate-ccw, rotate-cw, fullscreen,
+  // close. Similar is there but hidden, since this library has no embeddings.
   await page.locator("#gallery [data-lb-type='image']").first().click();
   await expect(page.locator("#lb")).toHaveClass(/on/);
   await expect(page.locator("#lb-rotate")).toBeVisible();
   const ids = await page.locator(".lb-controls button").evaluateAll((els) => els.map((e) => e.id));
-  expect(ids).toEqual(["lb-rotate-ccw", "lb-rotate", "lb-fs", "lb-close"]);
+  expect(ids).toEqual(["lb-similar", "lb-rotate-ccw", "lb-rotate", "lb-fs", "lb-close"]);
 
   // Rotating posts to the endpoint and re-fetches the preview (cache-busted).
   const rotateResponse = page.waitForResponse(

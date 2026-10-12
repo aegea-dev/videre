@@ -77,12 +77,13 @@ th.preview-th{width:130px}
 .lb-next{right:16px}
 .lb-nav[hidden]{display:none}
 .lb-controls{position:absolute;top:10px;right:10px;display:flex;gap:8px;z-index:1002}
-.lb-rotate,.lb-fs,.lb-close{width:34px;height:34px;border-radius:6px;border:none;background:rgba(0,0,0,.5);color:#fff;font-size:19px;line-height:1;cursor:pointer;padding:0;-webkit-user-select:none;user-select:none}
+.lb-similar,.lb-rotate,.lb-fs,.lb-close{width:34px;height:34px;border-radius:6px;border:none;background:rgba(0,0,0,.5);color:#fff;font-size:19px;line-height:1;cursor:pointer;padding:0;-webkit-user-select:none;user-select:none}
 .lb-rotate{font-size:22px}
 .lb-close{font-size:24px}
-.lb-rotate:hover,.lb-fs:hover,.lb-close:hover{background:rgba(0,0,0,.75)}
+.lb-similar:hover,.lb-rotate:hover,.lb-fs:hover,.lb-close:hover{background:rgba(0,0,0,.75)}
 .lb-rotate:disabled{opacity:.5;cursor:default}
-.lb-rotate[hidden],.lb-fs[hidden]{display:none}
+.lb-similar[hidden],.lb-rotate[hidden],.lb-fs[hidden]{display:none}
+.lb-similar{display:inline-flex;align-items:center;justify-content:center}
 .lightbox:fullscreen{background:#000}
 .lightbox:fullscreen .lb-stage{max-width:100vw;max-height:100vh}
 .lightbox:fullscreen img,.lightbox:fullscreen video{max-width:100vw;max-height:100vh}
@@ -121,12 +122,12 @@ th.preview-th{width:130px}
 .results-head{display:flex;align-items:center;gap:10px;margin-bottom:10px}
 .results-head h2{font-size:14px}
 .results-open{font-size:12px}
+.results-back{font-size:13px;text-decoration:none;white-space:nowrap}
 .results-count{color:#71717a;font-size:12px}
 #search-head{margin:12px 16px 0}
 .results-strip{display:flex;gap:10px;overflow-x:auto;padding-bottom:6px}
 .rcard{flex:0 0 auto;width:132px;text-align:center;position:relative}
 .rcard .thumb{max-width:120px;max-height:120px}
-.rcard.query{border-right:2px solid #e4e4e7;padding-right:10px;margin-right:4px}
 .score{position:absolute;top:4px;left:8px;background:rgba(24,24,27,.75);color:#fff;font-size:10px;padding:1px 5px;border-radius:4px;z-index:1}
 .copies{position:absolute;top:4px;right:8px;background:#fbbf24;color:#18181b;font-size:10px;font-weight:700;padding:1px 5px;border-radius:4px}
 .rname{font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#52525b;margin-top:2px}

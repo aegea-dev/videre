@@ -73,8 +73,11 @@ Once the lightbox is open, move through the items without closing it: the
 on-screen arrows at the left and right edges, or the **Left** and **Right**
 arrow keys, step to the previous and next item. Stepping past the last loaded
 item pulls in the next page automatically and keeps going, so **Show more** is
-not needed to browse to the end. At the item's top-right corner sit up to three
-buttons: **Rotate** (photos only) turns the image 90 degrees by editing its
+not needed to browse to the end. At the item's top-right corner sit up to four
+buttons: **Similar** (once `videre embed` has run) closes the lightbox and
+opens the photos that look most like this one, as a card's **Similar** button
+does;
+**Rotate** (photos only) turns the image 90 degrees by editing its
 orientation in place, never re-encoding the pixels, and turns the photo's face
 boxes with it so face crops stay on their faces; **Fullscreen** blows the whole lightbox up to
 the screen, arrows and info panel included (the same button, or **Escape**,
@@ -113,8 +116,8 @@ stays visible even when a file has none of the people or location data yet.
 
 | Path | What you get |
 |------|--------------|
-| `/` | Every file, with a **Similar** button on each card once the library has embeddings (the grid under the map has it too) |
-| `/search?like=<hash>`, `/search?q=...` | A ranking as a page of its own: files like one, or matching words, within the query's filters. **Open as a page** on a Similar or text-results strip leads here, and a bookmark reopens it. **Show more** continues the ranking |
+| `/` | Every file, with a **Similar** button on each card once the library has embeddings (the Date page and the grid under the map have it too) |
+| `/search?like=<hash>`, `/search?q=...` | A ranking as a page of its own: files like one, or matching words, within the query's filters. **Similar** leads here, with a **Back** link to the page it was pressed on; **Open as a page** on a text-results strip does too, and a bookmark reopens it. **Show more** continues the ranking |
 | `/duplicates` | Duplicate groups by [kind](/commands/dedupe/#kinds), the same groups `dedupe review` writes, with **Trash copies** per group and **Trash all copies** in the toolbar |
 | `/people` | Face groups, and naming them. Singletons load as you scroll; naming one keeps your place |
 | `/date` | A Year / Month / Day drill-down. A year card shows up to 20 of its files, a month card up to 12 and a day card up to 6, tiled to fill a frame of one size per level; the pick changes each day |
@@ -142,8 +145,8 @@ the right of the strip instead and opens the Library page with the query:
   date:2023` or `-tag:ekran` leave only the matching files, with a line above
   the grid saying how many of the library's files match, and a **clear** link.
 - **Words rank.** Words without a key rank the files the filters left, by
-  meaning, in the results strip above the grid: the same ranking the
-  **Similar** button uses, so they need a library with embeddings. Without
+  meaning, in the results strip above the grid: the same ranking
+  **Similar** uses, so they need a library with embeddings. Without
   embeddings the box is offered as a filter.
 - **A query that cannot run says so.** The line above the grid shows the error
   and the character it failed at, instead of an unfiltered grid.

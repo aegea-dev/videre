@@ -519,6 +519,8 @@ function openLb(url,type,metaJson){
     if(b){ b.hidden=!canRotate; b.disabled=false; }
   });
   lbCurrent = { hash: meta&&meta.hash, url: url };
+  var sim=document.getElementById('lb-similar');
+  if(sim)sim.hidden=!(lbCurrent.hash&&similarAvailable());
   // A fresh image starts fit-to-screen at the preview resolution; the full-res
   // original is loaded lazily on the first zoom.
   lbz={scale:1,x:0,y:0,full:false};
@@ -1406,15 +1408,30 @@ function humanDate(s){
 // used to appear only when the page had downloaded every vector, which switched
 // it off for exactly the libraries big enough to want it. A static export has
 // no server to ask, so it has no button.
-function similarBtn(hash){
-  if(typeof LIVE_SERVER==='undefined'||!LIVE_SERVER)return '';
+function similarAvailable(){
+  if(typeof LIVE_SERVER==='undefined'||!LIVE_SERVER)return false;
   // The Similar search ranks against embeddings; with none, it can only fail,
   // so offer no button rather than one that returns "Search failed".
-  if(typeof HAS_EMBEDDINGS!=='undefined'&&!HAS_EMBEDDINGS)return '';
-  // Results draw into #results (Files and Map); a page without it would
-  // throw on the answer, so it offers no button.
-  if(!document.getElementById('results'))return '';
+  return typeof HAS_EMBEDDINGS==='undefined'||!!HAS_EMBEDDINGS;
+}
+function similarBtn(hash){
+  if(!similarAvailable())return '';
   return '<button class="similar-btn" data-similar="'+escA(hash)+'">Similar</button>';
+}
+// Every Similar button, on a card or in the lightbox, opens the ranking as a
+// page of its own: a full grid with paging, where a strip showed one row.
+// The query's filters narrow it as they narrowed this page, and `from`
+// brings the Back link there to the page the search started on.
+function goSimilar(hash){
+  location.href='/search?like='+encodeURIComponent(hash)+filtersParam()+
+    '&from='+encodeURIComponent(location.pathname+location.search);
+}
+// Only a path within the gallery: an address of another site, or one that
+// a browser reads as one (//host), is no Back link.
+function searchBackLink(){
+  var from=new URLSearchParams(location.search).get('from')||'';
+  if(from.charAt(0)!=='/'||from.charAt(1)==='/'||from.charAt(1)==='\\')return '';
+  return '<a class="results-back" href="'+escA(from)+'">&larr; Back</a>';
 }
 // ---- Tile view (justified rows) --------------------------------------------
 // An image-first layout for the Files and Date galleries, beside List. The
@@ -1612,60 +1629,16 @@ window.setGalleryLocation=function(lat,lon,radius){
   if(gallery){clearTileMode(gallery);gallery.innerHTML='';}
   renderGallery();
 };
-function findSimilar(hash){
-  var panel=document.getElementById('results');
-  if(panel){panel.style.display='block';panel.innerHTML='<div class="results-head"><h2>Searching&hellip;</h2></div>';}
-  fetch('/api/search?like='+encodeURIComponent(hash)+'&limit=24')
-    .then(function(r){ if(!r.ok)throw 0; return r.json(); })
-    .then(function(d){ renderResults(hash,d.results||[]); })
-    .catch(function(){
-      if(panel)panel.innerHTML='<div class="results-head"><h2>Search failed</h2>'+
-        '<button onclick="clearResults()">Close</button></div>';
-    });
-}
-function resultCard(hash,score,isQuery){
+function resultCard(hash,score){
   var f=RESULT_ROWS[hash];
   if(!f)return '';
   var fname=f.path.split('/').pop()||f.path;
-  var badge=isQuery?'':'<span class="score">'+score.toFixed(3)+'</span>';
   var n=(typeof f.copies==='number')?f.copies:1;
   var copies=n>1?'<span class="copies">x'+n+'</span>':'';
-  return '<div class="rcard'+(isQuery?' query':'')+'" data-hash="'+escA(hash)+'">'+
-    badge+copies+buildPreview(f)+
-    '<div class="rname" title="'+escA(f.path)+'">'+(isQuery?'query: ':'')+escH(fname)+'</div>'+
+  return '<div class="rcard" data-hash="'+escA(hash)+'">'+
+    '<span class="score">'+score.toFixed(3)+'</span>'+copies+buildPreview(f)+
+    '<div class="rname" title="'+escA(f.path)+'">'+escH(fname)+'</div>'+
     '</div>';
-}
-// :warning: Results are drawn from rows fetched by hash, not from a complete
-// in-memory array. Similarity ranks a few dozen out of the whole library, and
-// requiring every row to be present just to display 24 of them is what made the
-// page carry the library in the first place.
-function renderResults(qHash,scored){
-  var need=[qHash];
-  for(var i=0;i<scored.length;i++)need.push(scored[i].hash);
-  var missing=need.filter(function(h){return !RESULT_ROWS[h];});
-  if(missing.length===0){ drawResults(qHash,scored); return; }
-  fetch('/api/files?hashes='+encodeURIComponent(missing.join(',')))
-    .then(function(r){ return r.json(); })
-    .then(function(d){
-      (d.files||[]).forEach(function(f){ RESULT_ROWS[f.hash]=f; });
-      drawResults(qHash,scored);
-    })
-    .catch(function(){ drawResults(qHash,scored); });
-}
-function drawResults(qHash,scored){
-  var panel=document.getElementById('results');
-  var html='<div class="results-head"><h2>Similar images</h2>'+
-    searchPageLink('like='+encodeURIComponent(qHash)+filtersParam())+
-    '<button onclick="clearResults()">Close</button></div>'+
-    '<div class="results-strip">'+resultCard(qHash,1,true);
-  for(var i=0;i<scored.length;i++){
-    html+=resultCard(scored[i].hash,scored[i].score,false);
-  }
-  html+='</div>';
-  panel.innerHTML=html;
-  panel.style.display='block';
-  panel.querySelectorAll('img').forEach(function(img){if(img.loading==='lazy')img.loading='eager';});
-  panel.scrollIntoView({behavior:'smooth',block:'start'});
 }
 // A strip's results as a page of their own, which a link or bookmark reopens.
 // Live only: a static export has no server to search.
@@ -1690,7 +1663,7 @@ function runSearchPage(){
   var head=document.createElement('div');
   head.id='search-head';
   head.className='results-head';
-  head.innerHTML='<h2>Searching&hellip;</h2>';
+  head.innerHTML=searchBackLink()+'<h2>Searching&hellip;</h2>';
   g.parentNode.insertBefore(head,g);
   var btn=document.getElementById('gallery-more');
   if(btn)btn.style.display='none';
@@ -1721,7 +1694,7 @@ function runSearchPage(){
           return copy;
         }).filter(Boolean);
         var shown=gShown+files.length;
-        head.innerHTML='<h2>'+title+'</h2><span class="results-count">'+shown+' result'+(shown===1?'':'s')+'</span>';
+        head.innerHTML=searchBackLink()+'<h2>'+title+'</h2><span class="results-count">'+shown+' result'+(shown===1?'':'s')+'</span>';
         if(!shown){ g.innerHTML='<p class="muted">Nothing ranked.</p>'; return; }
         appendCards(files,shown);
         searchMore=d.more?next:null;
@@ -1731,7 +1704,7 @@ function runSearchPage(){
   }
   function next(){
     page().catch(function(){
-      if(title===null){ head.innerHTML='<h2>Search failed</h2>'; return; }
+      if(title===null){ head.innerHTML=searchBackLink()+'<h2>Search failed</h2>'; return; }
       // Say so, rather than leaving a button that silently does nothing.
       searchMore=next;
       if(btn)btn.textContent='Could not load more. Click to retry.';
@@ -1743,6 +1716,13 @@ function clearResults(){
   var panel=document.getElementById('results');
   panel.style.display='none';
   panel.innerHTML='';
+}
+// The lightbox's Similar does what a card's Similar button does.
+function lbSimilar(){
+  var hash=lbCurrent&&lbCurrent.hash;
+  if(!hash)return;
+  closeLb();
+  goSimilar(hash);
 }
 // The nav search box submits to `/?q=`; the Files page reads it here and ranks
 // the library semantically through the same /api/search endpoint the Similar
@@ -1779,7 +1759,7 @@ function drawTextResults(query,scored){
   var html='<div class="results-head"><h2>Results for &ldquo;'+escH(query)+'&rdquo;</h2>'+
     searchPageLink('q='+encodeURIComponent(query))+
     '<button onclick="clearResults()">Close</button></div><div class="results-strip">';
-  for(var i=0;i<scored.length;i++)html+=resultCard(scored[i].hash,scored[i].score,false);
+  for(var i=0;i<scored.length;i++)html+=resultCard(scored[i].hash,scored[i].score);
   html+='</div>';
   if(!scored.length)html='<div class="results-head"><h2>No matches for &ldquo;'+escH(query)+
     '&rdquo;</h2><button onclick="clearResults()">Close</button></div>';
@@ -1812,7 +1792,7 @@ if(typeof ALLFILES!=='undefined'){
 }
 document.addEventListener('click',function(e){
   var sb=e.target.closest('[data-similar]');
-  if(sb){e.preventDefault();e.stopPropagation();findSimilar(sb.dataset.similar);}
+  if(sb){e.preventDefault();e.stopPropagation();goSimilar(sb.dataset.similar);}
 });
 // Reflect the stored mode and sort in the controls on load. The initial
 // render already honours viewMode() through appendCards / the date path, and

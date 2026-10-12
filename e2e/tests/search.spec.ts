@@ -14,7 +14,11 @@ async function hashOf(page: Page, gallery: GallerySession, name: string): Promis
 }
 
 function resultNames(page: Page) {
-  return page.locator("#results .rcard:not(.query) .rname");
+  return page.locator("#results .rcard .rname");
+}
+
+function rankedNames(page: Page) {
+  return page.locator("#gallery .card .card-meta[title]");
 }
 
 test("with stored vectors the nav search box is offered", async ({ page, searchGallery }) => {
@@ -32,41 +36,32 @@ test("the nav search box is offered in every section, not only Library and Map",
   }
 });
 
-test("Similar works on the grid under the map", async ({ page, searchGallery }) => {
+test("Similar on the grid under the map opens the ranking with a way back", async ({ page, searchGallery }) => {
   await preferListView(searchGallery);
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
   // A map with no places shows the empty state, so give it one.
   seedPlace(searchGallery.libraryRoot);
+  const cicek = await hashOf(page, searchGallery, "çiçek.jpg");
   await page.goto(`${searchGallery.baseURL}/map`);
   const card = page.locator("#gallery .card", { hasText: "çiçek.jpg" });
   await card.locator(".similar-btn").click();
-  await expect(page.locator("#results .results-head h2")).toHaveText("Similar images");
-  await expect(resultNames(page)).toHaveText(["bahçe.jpg", "deniz.jpg"]);
+
+  await expect(page).toHaveURL(`${searchGallery.baseURL}/search?like=${cicek}&from=%2Fmap`);
+  await expect(page.locator("#search-head h2")).toHaveText("Similar to çiçek.jpg");
+  await expect(rankedNames(page)).toHaveText(["bahçe.jpg", "deniz.jpg"]);
+
+  await page.locator("#search-head .results-back").click();
+  await expect(page).toHaveURL(`${searchGallery.baseURL}/map`);
   expect(errors).toEqual([]);
 });
 
-test("a page with nowhere to show results offers no Similar button", async ({ page, searchGallery }) => {
+test("the Date page offers Similar too", async ({ page, searchGallery }) => {
   await preferListView(searchGallery);
   await page.goto(`${searchGallery.baseURL}/date/2021`);
   // Present, not visible: a large preview may still be rendering.
   await expect(page.locator("#dateGrid [data-lb-url]")).not.toHaveCount(0);
-  await expect(page.locator(".similar-btn")).toHaveCount(0);
-});
-
-test("Similar ranks the closest file first and leaves out the example", async ({ page, searchGallery }) => {
-  await preferListView(searchGallery);
-  await page.goto(searchGallery.baseURL);
-  const card = page.locator("#gallery .card", { hasText: "çiçek.jpg" });
-  await card.locator(".similar-btn").click();
-
-  const results = page.locator("#results");
-  await expect(results.locator(".results-head h2")).toHaveText("Similar images");
-  await expect(results.locator(".rcard.query .rname")).toHaveText("query: çiçek.jpg");
-  await expect(resultNames(page)).toHaveText(["bahçe.jpg", "deniz.jpg"]);
-
-  await results.locator(".results-head button", { hasText: "Close" }).click();
-  await expect(results).toBeHidden();
+  await expect(page.locator(".similar-btn")).not.toHaveCount(0);
 });
 
 test("the nav search runs a text query and shows what it ranked", async ({ page, searchGallery }) => {
@@ -105,4 +100,36 @@ test("a failed search says so and closes", async ({ page, searchGallery }) => {
   await expect(results.locator(".results-head h2")).toHaveText("Search failed");
   await results.locator(".results-head button", { hasText: "Close" }).click();
   await expect(results).toBeHidden();
+});
+
+test("the lightbox's Similar closes it and opens the ranking", async ({ page, searchGallery }) => {
+  await preferListView(searchGallery);
+  const cicek = await hashOf(page, searchGallery, "çiçek.jpg");
+  await page.goto(searchGallery.baseURL);
+  const card = page.locator("#gallery .card", { hasText: "çiçek.jpg" });
+  await card.locator("[data-lb-url]").first().click();
+  await expect(page.locator("#lb")).toHaveClass(/on/);
+  await page.locator("#lb-similar").click();
+
+  await expect(page).toHaveURL(`${searchGallery.baseURL}/search?like=${cicek}&from=%2F`);
+  await expect(page.locator("#search-head h2")).toHaveText("Similar to çiçek.jpg");
+  await expect(rankedNames(page)).toHaveText(["bahçe.jpg", "deniz.jpg"]);
+
+  await page.locator("#search-head .results-back").click();
+  await expect(page).toHaveURL(`${searchGallery.baseURL}/`);
+});
+
+test("the Back link goes only to a page of the gallery", async ({ page, searchGallery }) => {
+  const cicek = await hashOf(page, searchGallery, "çiçek.jpg");
+  const elsewhere = ["https://example.com/", "//example.com/", "/\\example.com"];
+  for (const from of elsewhere) {
+    await page.goto(`${searchGallery.baseURL}/search?like=${cicek}&from=${encodeURIComponent(from)}`);
+    await expect(page.locator("#search-head h2")).toHaveText("Similar to çiçek.jpg");
+    await expect(page.locator("#search-head .results-back"), from).toHaveCount(0);
+  }
+
+  // A page of the gallery comes back with its own query.
+  const from = "/date/2021?q=tag:deniz";
+  await page.goto(`${searchGallery.baseURL}/search?like=${cicek}&from=${encodeURIComponent(from)}`);
+  await expect(page.locator("#search-head .results-back")).toHaveAttribute("href", from);
 });

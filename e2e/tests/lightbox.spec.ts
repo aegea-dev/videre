@@ -64,6 +64,13 @@ test("stepping from a clip to a photo stops the clip", async ({ page, sortedGall
   await expect(page.locator("#lb-vid")).toHaveAttribute("src", "");
 });
 
+test("a library without embeddings offers no Similar in the lightbox", async ({ page, sortedGallery }) => {
+  await page.goto(sortedGallery.baseURL);
+  await openFirst(page);
+  await expect(page.locator("#lb-close")).toBeVisible();
+  await expect(page.locator("#lb-similar")).toBeHidden();
+});
+
 test("Next past the loaded page loads the next page and carries on", async ({ page, sortedGallery }) => {
   await writeSettings(sortedGallery, { routes: { files: { pageSize: 1 } } });
   await page.goto(sortedGallery.baseURL);
