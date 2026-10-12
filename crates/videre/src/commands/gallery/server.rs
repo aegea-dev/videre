@@ -4501,6 +4501,32 @@ async fn handle_fonts(
 /// fifteen years, twelve months, thirty-one days. The representative row is
 /// included because each card shows a thumbnail, and fetching those separately
 /// would be one request per bucket.
+/// How many files a year, month and day card on the Date page show.
+const YEAR_MOSAIC: usize = 20;
+const MONTH_MOSAIC: usize = 12;
+const DAY_MOSAIC: usize = 6;
+
+/// A file's place in `day`'s mosaic order: random-looking, the same all day.
+fn mosaic_rank(day: &str, hash: &str) -> [u8; 8] {
+    let mut h = blake3::Hasher::new();
+    h.update(day.as_bytes());
+    h.update(hash.as_bytes());
+    let mut out = [0; 8];
+    out.copy_from_slice(&h.finalize().as_bytes()[..8]);
+    out
+}
+
+fn sample_json(path: &str, hash: &str, ext: &str, w: Option<i32>, h: Option<i32>) -> String {
+    format!(
+        "{{\"path\":{},\"hash\":{},\"ext\":{},\"w\":{},\"h\":{}}}",
+        json_str(path),
+        json_str(hash),
+        json_str(ext),
+        w.map(|v| v.to_string()).unwrap_or("null".into()),
+        h.map(|v| v.to_string()).unwrap_or("null".into()),
+    )
+}
+
 async fn handle_dates(
     State(state): State<Arc<AppState>>,
     Query(q): Query<DatesQuery>,
@@ -4513,16 +4539,11 @@ async fn handle_dates(
     let effective = videre_core::query::EFFECTIVE_DATE_SQL;
     let keep = keep_set_sql();
 
-    let mut sql = format!(
-        "SELECT substr({effective}, 1, {len}) AS k, COUNT(*) AS n, \
-                path, hash, COALESCE(ext,''), width, height, MIN(path) \
-         FROM {keep} AS f \
-         WHERE {effective} IS NOT NULL AND {effective} NOT LIKE '0000%'"
-    );
+    let mut filter = format!("{effective} IS NOT NULL AND {effective} NOT LIKE '0000%'");
     let mut params: Vec<String> = Vec::new();
     if parent_len > 0 {
         if let Some(p) = q.parent.as_deref().filter(|p| !p.is_empty()) {
-            sql.push_str(&format!(" AND substr({effective}, 1, {parent_len}) = ?1"));
+            filter.push_str(&format!(" AND substr({effective}, 1, {parent_len}) = ?1"));
             params.push(p.to_string());
         }
     }
@@ -4537,14 +4558,18 @@ async fn handle_dates(
     let mut extra = String::new();
     if let Some(applied) = &applied {
         if applied.filtered {
-            sql.push_str(&format!(
+            filter.push_str(&format!(
                 " AND f.hash IN (SELECT hash FROM {QUERY_HASHES_TABLE})"
             ));
         }
         let (matched, library_total) = keep_set_counts(&conn, applied)?;
         extra = format!(",\"matched\":{matched},\"library_total\":{library_total}");
     }
-    sql.push_str(" GROUP BY k ORDER BY k DESC");
+    let sql = format!(
+        "SELECT substr({effective}, 1, {len}) AS k, COUNT(*) AS n, \
+                path, hash, COALESCE(ext,''), width, height, MIN(path) \
+         FROM {keep} AS f WHERE {filter} GROUP BY k ORDER BY k DESC"
+    );
 
     let mut stmt = conn
         .prepare(&sql)
@@ -4567,6 +4592,68 @@ async fn handle_dates(
         .filter_map(|r| r.ok())
         .collect::<Vec<_>>();
     drop(stmt);
+
+    // A year, month or day card is a mosaic of that period's files. The pick
+    // holds for the day, so the thumbnails the first visit makes serve every
+    // later one, and changes the next. The keep set holds one row per content
+    // hash, so a file is never picked twice. Photos come first: a video's
+    // poster takes QuickLook seconds, and a mosaic of them stays blank while
+    // they are made.
+    let mosaic = match len {
+        4 => YEAR_MOSAIC,
+        7 => MONTH_MOSAIC,
+        _ => DAY_MOSAIC,
+    };
+    let mut mosaics: std::collections::HashMap<String, Vec<String>> = Default::default();
+    {
+        let sql = format!(
+            "SELECT substr({effective}, 1, {len}), path, hash, COALESCE(ext,''), width, height, \
+                    COALESCE(f.mime LIKE 'video/%', 0) \
+             FROM {keep} AS f WHERE {filter}"
+        );
+        let mut stmt = conn
+            .prepare(&sql)
+            .map_err(|e| internal(anyhow::anyhow!("/api/dates mosaic failed: {e}\n  {sql}")))?;
+        type Candidate = (
+            String,
+            String,
+            String,
+            String,
+            Option<i32>,
+            Option<i32>,
+            bool,
+        );
+        let mut by_key: std::collections::HashMap<String, Vec<Candidate>> = Default::default();
+        for row in stmt
+            .query_map(rusqlite::params_from_iter(params.iter()), |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                    r.get::<_, String>(3)?,
+                    r.get::<_, Option<i32>>(4)?,
+                    r.get::<_, Option<i32>>(5)?,
+                    r.get::<_, bool>(6)?,
+                ))
+            })
+            .map_err(internal)?
+            .filter_map(|r| r.ok())
+        {
+            by_key.entry(row.0.clone()).or_default().push(row);
+        }
+        let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+        for (key, mut files) in by_key {
+            files.sort_by_cached_key(|f| (f.6, mosaic_rank(&today, &f.2)));
+            mosaics.insert(
+                key,
+                files
+                    .iter()
+                    .take(mosaic)
+                    .map(|f| sample_json(&f.1, &f.2, &f.3, f.4, f.5))
+                    .collect(),
+            );
+        }
+    }
     drop(conn);
 
     let mut out = String::from("{\"buckets\":[");
@@ -4575,14 +4662,15 @@ async fn handle_dates(
             out.push(',');
         }
         out.push_str(&format!(
-            "{{\"key\":{},\"count\":{n},\"sample\":{{\"path\":{},\"hash\":{},\"ext\":{},\"w\":{},\"h\":{}}}}}",
+            "{{\"key\":{},\"count\":{n},\"sample\":{}",
             json_str(key),
-            json_str(path),
-            json_str(hash),
-            json_str(ext),
-            w.map(|v| v.to_string()).unwrap_or("null".into()),
-            h.map(|v| v.to_string()).unwrap_or("null".into()),
+            sample_json(path, hash, ext, *w, *h),
         ));
+        {
+            let samples = mosaics.get(key).map(|v| v.join(",")).unwrap_or_default();
+            out.push_str(&format!(",\"samples\":[{samples}]"));
+        }
+        out.push('}');
     }
     out.push(']');
     out.push_str(&extra);
@@ -5487,6 +5575,17 @@ async fn handle_raw_file(
         )),
         _ => None,
     };
+    // Where a HEIC tile this server converts is kept, the file watch's HEIC
+    // stage writes for its own sizes. Tiles ask for sizes watch does not make,
+    // and an unkept conversion cost every later request QuickLook seconds.
+    let heic_cache = match (is_heic, size) {
+        (true, Some(px)) => Some((
+            state.context.library.cache.thumbnails.clone(),
+            videre_core::thumb_cache::thumb_tmp_path_in(&state.context.library.cache, &hash, px),
+            videre_core::thumb_cache::thumb_path_in(&state.context.library.cache, &hash, px),
+        )),
+        _ => None,
+    };
     let converted = tokio::task::spawn_blocking(move || -> Option<(&'static str, Vec<u8>)> {
         if ext == "heic" {
             // `size` doubles as the qlmanage render cap: when Some, this
@@ -5513,6 +5612,12 @@ async fn handle_raw_file(
                 image::ImageFormat::Jpeg,
             )
             .ok()?;
+            if let Some((dir, tmp, final_)) = &heic_cache {
+                let _ = std::fs::create_dir_all(dir);
+                if std::fs::write(tmp, &buf).is_ok() {
+                    let _ = std::fs::rename(tmp, final_);
+                }
+            }
             Some(("image/jpeg", buf))
         } else if matches!(ext.as_str(), "mov" | "mp4") && size.is_some() {
             // Video poster: QuickLook renders the frame display-oriented, so the

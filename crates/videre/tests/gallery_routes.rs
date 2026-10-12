@@ -495,6 +495,37 @@ fn a_sized_video_request_returns_an_oriented_poster_jpeg() {
     );
 }
 
+// A HEIC tile the gallery converts is kept, like a raster tile or a video
+// poster. watch caches 240 and 1200 px but tiles ask for 480, so before this
+// every HEIC tile paid a QuickLook conversion (~0.44 s) on every visit.
+#[test]
+#[cfg(target_os = "macos")]
+fn a_heic_tile_the_gallery_converts_is_cached() {
+    let lib = TestLibrary::new();
+    let dst = lib
+        .copy_fixture("heic/grid_rot90.heic", "Çiğdem_doğum_günü.heic")
+        .canonicalize()
+        .unwrap();
+    lib.init_db()
+        .execute(
+            "INSERT INTO file_hashes (path, hash, ext, size_bytes) VALUES (?1, 'heic1', 'heic', 1000)",
+            [dst.to_string_lossy().as_ref()],
+        )
+        .unwrap();
+    let cached = videre_core::thumb_cache::thumb_path_in(&lib.context().cache, "heic1", 480);
+
+    let server = Server::start(&lib);
+    let (status, content_type, body) = server.get_bytes("/api/files/heic1/raw?size=480");
+    assert_eq!(status, 200);
+    assert_eq!(content_type.as_deref(), Some("image/jpeg"));
+    assert_eq!(
+        std::fs::read(&cached).ok(),
+        Some(body),
+        "the converted tile was not kept at {}",
+        cached.display()
+    );
+}
+
 #[test]
 #[cfg(target_os = "macos")]
 fn a_conversion_waits_for_a_machine_wide_quicklook_slot() {
@@ -1092,6 +1123,104 @@ fn the_date_tree_comes_from_the_whole_library() {
         buckets[0]["sample"]["path"].is_string(),
         "a bucket must carry a sample row for its preview"
     );
+}
+
+// A year card is a mosaic: up to twenty files of that year, each one of the
+// year's own and none twice, picked anew each day. Photos come before videos,
+// whose posters take seconds each to make. A month card holds up to twelve, a
+// day card up to six.
+#[test]
+fn a_year_bucket_carries_up_to_twenty_samples_from_that_year() {
+    let lib = TestLibrary::new();
+    let root = lib.context().paths.root.clone();
+    let conn = lib.init_db();
+    // Files 20 to 24 of 2024 are videos.
+    for i in 0..25 {
+        let (ext, mime) = if i < 20 {
+            ("jpg", "image/jpeg")
+        } else {
+            ("mp4", "video/mp4")
+        };
+        conn.execute(
+            "INSERT INTO file_hashes (path, hash, ext, mime, size_bytes, exif_date)
+               VALUES (?1, ?2, ?3, ?4, 10, ?5)",
+            rusqlite::params![
+                root.join(format!("Şükrü_düğün_{i:02}.{ext}"))
+                    .to_string_lossy(),
+                format!("y24_{i:02}"),
+                ext,
+                mime,
+                format!("2024-0{}-1{}T10:00:00", 1 + i % 9, i % 10),
+            ],
+        )
+        .unwrap();
+    }
+    for i in 0..3 {
+        conn.execute(
+            "INSERT INTO file_hashes (path, hash, ext, size_bytes, exif_date)
+               VALUES (?1, ?2, 'jpg', 10, '2023-05-01T09:00:00')",
+            rusqlite::params![
+                root.join(format!("Gökçe_{i}.jpg")).to_string_lossy(),
+                format!("y23_{i}"),
+            ],
+        )
+        .unwrap();
+    }
+    drop(conn);
+    let server = Server::start(&lib);
+
+    let (status, body) = server.get("/api/dates?level=year");
+    assert_eq!(status, 200);
+    let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+    let buckets = v["buckets"].as_array().expect("buckets");
+    for (year, prefix, want) in [("2024", "y24_", 20), ("2023", "y23_", 3)] {
+        let b = buckets.iter().find(|b| b["key"] == year).expect(year);
+        let samples = b["samples"].as_array().expect("samples");
+        assert_eq!(samples.len(), want, "{year}");
+        let hashes: std::collections::HashSet<&str> = samples
+            .iter()
+            .map(|s| s["hash"].as_str().unwrap())
+            .collect();
+        assert_eq!(hashes.len(), want, "{year}: a file appears twice");
+        assert!(
+            hashes.iter().all(|h| h.starts_with(prefix)),
+            "{year}: {hashes:?}"
+        );
+    }
+    let year_2024 = buckets.iter().find(|b| b["key"] == "2024").unwrap();
+    assert!(
+        year_2024["samples"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|s| s["ext"] == "jpg"),
+        "a video was picked while photos were left: {year_2024}"
+    );
+
+    // The pick holds for the day, so the thumbnails made on the first visit
+    // serve every later one.
+    let (_, again) = server.get("/api/dates?level=year");
+    let again: serde_json::Value = serde_json::from_str(&again).unwrap();
+    assert_eq!(
+        again["buckets"], v["buckets"],
+        "a second visit on the same day picked other files"
+    );
+
+    // 2024-01 holds files 0, 9 and 18; 2023-05 all three of 2023.
+    let (_, body) = server.get("/api/dates?level=month&parent=2024");
+    let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+    let jan = v["buckets"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|b| b["key"] == "2024-01")
+        .expect("2024-01");
+    assert_eq!(jan["samples"].as_array().map(Vec::len), Some(3));
+
+    let (_, body) = server.get("/api/dates?level=day&parent=2023-05");
+    let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(v["buckets"][0]["samples"].as_array().map(Vec::len), Some(3));
+    assert!(v["buckets"][0]["sample"]["path"].is_string());
 }
 
 #[test]

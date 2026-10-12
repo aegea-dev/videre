@@ -24,6 +24,17 @@ test("the caret opens one column per key, filled from the library", async ({ pag
   await expect(type.locator(".qopt-val")).toHaveText(["image", "video"]);
 });
 
+// A page that is already a place or a date leaves its own column out.
+for (const [route, gone] of [["/map", "Place"], ["/date", "Date"]]) {
+  test(`${route} leaves the ${gone} column out of the panel`, async ({ page, gallery }) => {
+    await page.goto(gallery.baseURL + route);
+    await page.locator("#qbox-caret").click();
+    await expect(panel(page)).toBeVisible();
+    await expect(panel(page).locator(".qopt-col h3", { hasText: "People" })).toHaveCount(1);
+    await expect(panel(page).locator(".qopt-col h3", { hasText: gone })).toHaveCount(0);
+  });
+}
+
 test("choosing values writes chips, and Apply runs the query", async ({ page, gallery }) => {
   await page.goto(gallery.baseURL);
   await page.locator("#qbox-caret").click();
