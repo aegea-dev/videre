@@ -113,9 +113,8 @@ CREATE TABLE faces (
 stored as raw f16, so 1024 bytes. `cluster_id` is assigned by grouping;
 `person_label` and `confirmed` are what the labeling UI writes, and
 [`search --person`](/commands/search/) reads.
-Face IDs never reuse a deleted ID, including IDs retained in journal and
-question provenance. Schema 4 reserves historical IDs during its one-time
-upgrade from schema 3.
+Face IDs never reuse a deleted ID. Schema 4 reserves historical IDs during
+its one-time upgrade from schema 3.
 
 `oriented` is always `1`: `bbox` and `landmark` are measured on the display
 canvas, the orientation a person sees.
@@ -425,32 +424,25 @@ SELECT COUNT(*) FROM file_hashes WHERE mime = 'application/octet-stream';
 ## Enforced relationships
 
 videre turns `PRAGMA foreign_keys = ON` on every connection it opens itself,
-so these four relationships are checked by SQLite, not just by the
+so these two relationships are checked by SQLite, not just by the
 application:
 
 - `faces.person_label` references `people(name)`
 - `file_hashes.location_cluster_id` references `location_clusters(id)`
-- `face_learning_event_faces.event_id` references `face_learning_events(id)`
-- `face_learning_question_faces.question_id` references `face_learning_questions(id)`
 
 Deleting a parent that rows still reference fails with a constraint error
 rather than silently orphaning children. When you delete a person, videre
-unassigns their faces and invalidates their teaching evidence first; when the
+unassigns their faces first; when the
 location clusters are recomputed, the file references are cleared before the
 old clusters are removed.
 
-Two relationships are deliberately **not** foreign keys, because their
-parents are not the rows a child belongs to:
+One relationship is deliberately **not** a foreign key, because its parent is
+not the row a child belongs to:
 
 - `file_hashes.hash` is not a key into anything: many derived rows
   (embeddings, decode failures, classification results) key on the hash, and
   one hash can appear on several paths. Deleting one `file_hashes` row must
   not cascade into the others.
-- `face_learning_event_faces.face_id` and the question equivalent are
-  historical provenance: they record which faces an action was about. Prune
-  keeps those references even when the face row is removed, but marks an
-  affected event ineligible with `source_face_pruned`. This preserves the
-  journal without allowing missing source content to train a new profile.
 
 ## Writing to it yourself
 

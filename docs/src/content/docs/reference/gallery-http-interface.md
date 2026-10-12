@@ -919,12 +919,9 @@ content-length: 0
 
 ### `PUT /api/people/{name}/faces`
 
-Replaces the set of faces assigned to a person. Teaching mutations return
-a learning acknowledgement: the generation the action produced and the
-ids of the durable evidence rows written for it. The background worker
-uses that generation to decide when to retrain. While face learning is off
-(the default), the faces change the same way, nothing is recorded,
-`event_ids` is empty and `message_key` is `learning_off`.
+Names faces as a person, creating the person when the name is new. The
+faces must be unnamed, and several faces must be one cluster's whole
+unassigned group; anything else is refused with the reason.
 
 ```bash
 curl -i -X PUT "http://127.0.0.1:7878/api/people/ayse_yilmaz/faces" \
@@ -932,12 +929,9 @@ curl -i -X PUT "http://127.0.0.1:7878/api/people/ayse_yilmaz/faces" \
   -d '{"face_ids":[12,13,14]}'
 ```
 
-```json
-{
-  "generation": 1,
-  "event_ids": [1, 2],
-  "message_key": "cluster_confirmed"
-}
+```http
+HTTP/1.1 200 OK
+content-length: 0
 ```
 
 ## Recluster
@@ -952,8 +946,7 @@ built-in values. Only unlabeled faces are regrouped; named faces never move.
 ### `GET /api/faces/cluster-params`
 
 The parameters a recluster would use now, what the library has saved, the
-built-in values, any problem reading the saved ones, and the face learning
-summary (`null` while face learning is off).
+built-in values, and any problem reading the saved ones.
 
 ```bash
 curl "http://127.0.0.1:7878/api/faces/cluster-params"
@@ -966,8 +959,7 @@ curl "http://127.0.0.1:7878/api/faces/cluster-params"
   "saved": { "eps": 0.7 },
   "defaults": { "eps": 0.6, "min_cluster_size": 3, "merge_sim": 0.35, "min_face_size": 80.0,
                 "max_generic_sim": 0.4, "max_landmark_error": 7.0, "min_blur": 80.0, "attach_sim": 0.4 },
-  "warnings": [],
-  "learning": "Learning: not used yet; naming people teaches it."
+  "warnings": []
 }
 ```
 
@@ -1002,8 +994,7 @@ state. A value out of range answers `400` naming it:
 Applies the same pass: regroups the unlabeled faces, records a
 `face-recluster` run (shown by [`videre status`](/commands/status/)), saves
 the parameters that differ from the built-in values to `.videre/gallery.json`
-under `faces.clustering` (removing the entry when none differ), and refreshes
-the pending identity questions. From then on `videre faces` and `videre
+under `faces.clustering` (removing the entry when none differ). From then on `videre faces` and `videre
 watch` cluster this library with those values unless a flag says otherwise.
 
 The response is the preview's, plus `"saved": true`, or `"saved": false`
@@ -1011,108 +1002,6 @@ with `settings_error` when `gallery.json` could not be read; the grouping is
 applied either way and the unreadable file is left untouched. While a `videre
 faces` or `videre watch` run holds the library's faces lock, it answers `409
 {"error":"faces_busy"}` and changes nothing.
-
-## Face learning
-
-The gallery trains interpretable scorers from teaching actions in the
-background and asks bounded Yes/No/Skip identity questions. The
-resources below expose that state. Payloads carry scalar features and
-provenance only; embeddings never leave the library.
-
-Face learning is off unless the library's `gallery.json` sets
-`faces.learning` to `true` (see
-[Face learning](/commands/gallery/#face-learning)). While it is off, the
-status reports `"enabled": false`, the questions list is always empty,
-answering a question returns `503 Service Unavailable`, and the journal
-stays readable.
-
-### `GET /api/face-learning/status`
-
-Returns the background training state and pending question count.
-
-```bash
-curl "http://127.0.0.1:7878/api/face-learning/status"
-```
-
-```json
-{
-  "enabled": true,
-  "generation": 3,
-  "trained_generation": 3,
-  "status": "current",
-  "last_profile_id": 1,
-  "last_candidate": "promoted",
-  "last_error": null,
-  "feedback_needed": null,
-  "pending_questions": 2,
-  "active_profile": { "profile_id": 1, "stage": "suggestion" },
-  "summary": "Learning: profile 1 suggests names; grouping uses the settings above."
-}
-```
-
-`active_profile` is the profile in use, or `null`. `summary` is one sentence
-on what learning contributes right now, shown in the People toolbar: which
-profile suggests names, or that learning is not used yet and why (the
-feedback it is waiting for, or how many trained candidates missed the
-quality checks and the first check they missed).
-
-`status` is one of `current`, `stale` (feedback has arrived since the
-last run), `training` (a run is in progress; the status answers at once
-either way), `waiting`, or `failed` (the last run failed; the
-active profile stays as it is and `last_error` says why).
-
-`waiting` means the last run found too little feedback to train on, which
-is normal in a young library and not an error. `feedback_needed` says what
-would change that, for example `dissolve 2 more wrong clusters`: naming
-people only ever says which faces belong together, so the gallery also needs
-a few dissolved clusters before it can learn what a wrong group looks like.
-The next teaching action that records evidence trains again (naming a
-person from a single face records none), and the first gallery start after
-an upgrade tries once more. A failed run is retried the same ways. `last_error` is set only while `status` is `failed`.
-
-`last_candidate` says what became of the last trained candidate:
-`promoted` (it passed the quality gates and is the profile in use),
-`rejected` (it failed them and the previous profile stays), or `null`
-before any candidate was stored.
-
-### `GET /api/face-learning/questions`
-
-Returns pending identity questions, most valuable first.
-
-```bash
-curl "http://127.0.0.1:7878/api/face-learning/questions?limit=5"
-```
-
-Each question carries the subject face ids, the target person, the
-validated decision evidence (per-feature contributions to the score),
-and an evidence revision. `Yes` confirms the subject cluster as the
-target person and teaches one positive example; `No` teaches one
-negative example without labeling anyone; `Skip` only marks the
-question skipped.
-
-### `POST /api/face-learning/questions/{id}/answer`
-
-```bash
-curl -i -X POST "http://127.0.0.1:7878/api/face-learning/questions/4/answer" \
-  -H "content-type: application/json" \
-  -d '{"answer":"yes"}'
-```
-
-Returns the new delivery state and, for `yes` and `no`, the learning
-acknowledgement. Answering a question whose subject, target, profile, or evidence
-changed meanwhile returns `409 Conflict`. The outdated question is marked
-superseded and disappears from the pending queue; no label or teaching event is
-written. Fetch the pending questions again to see the next available question.
-
-### `GET /api/face-learning/events`
-
-Returns the durable teaching journal, newest first, with scalar feature
-snapshots and provenance but no embeddings. Supports `limit` (1 to 200)
-and `before` for stable pagination by event id.
-
-### `GET /api/face-learning/events/{id}`
-
-Returns one journal entry, or `404` for an unknown id.
 
 ## Faces and clusters
 
@@ -1324,9 +1213,4 @@ content-length: 0
 | `GET /api/faces/{id}/original` | Serve the source file for one face |
 | `GET /api/clusters/{id}` | Read one cluster |
 | `DELETE /api/clusters/{id}` | Dissolve one cluster |
-| `GET /api/face-learning/status` | Report the background training state |
-| `GET /api/face-learning/questions` | List pending identity questions |
-| `POST /api/face-learning/questions/{id}/answer` | Answer one identity question |
-| `GET /api/face-learning/events` | List the teaching journal |
-| `GET /api/face-learning/events/{id}` | Read one journal entry |
 | `POST /api/quit` | Stop the gallery server |

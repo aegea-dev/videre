@@ -236,20 +236,17 @@ sharpness and leave it behind.
 When `videre prune` removes the last indexed copy of a photo, its detected
 faces disappear from People, but the person's name remains. If the last face
 of a person was on that photo, the person can be labeled again later without
-recovering the deleted photo. The historical learning journal remains, though
-events that relied on the removed face no longer train new profiles.
+recovering the deleted photo.
 
 ## Reset
 
 `videre faces --reset` is the start-over button. It deletes every face row,
 every person you have named, the detection markers, and the decode-failure
-records. It also deletes face-learning events, identity questions, and learned
-profiles, then immediately re-runs the full detection and grouping pipeline, so
+records, then immediately re-runs the full detection and grouping pipeline, so
 the library ends up exactly as it would after a first-ever `videre faces`.
 
-Because it deletes your labels and learning history, it asks first. The prompt
-shows the counts of face rows, labeled faces, people, learning events, identity
-questions, and learned profiles that it would delete:
+Because it deletes your labels, it asks first. The prompt shows the counts of
+face rows, labeled faces and people that it would delete:
 
 ```bash
 videre faces --reset            # asks: "deletes 400 face row(s) (312 labeled
@@ -280,31 +277,6 @@ it to 1) to turn the pass off.
 
 It runs after grouping and can never merge two groups, which is what keeps it
 safe.
-
-## Teaching the gallery (experimental)
-
-Labeling actions in the gallery's People page write durable, inspectable
-teaching evidence when there is a comparison to record: naming a cluster,
-moving a face, removing a face, or dissolving a cluster each record what
-changed and the generic face-derived factors behind it. An action with
-nothing to compare against (naming the very first face of a new person, for
-example) records none. In the background, the gallery trains small interpretable
-scorers from that evidence and, once a scorer passes the shipped quality
-gates, asks bounded yes/no questions such as "Is this Elena?" on the People
-page. Answering Yes names that cluster; No only teaches; Skip does neither.
-
-What this is and is not:
-
-- The scoring uses generic face measurements (similarities, sizes, quality),
-  never filenames, paths, locations, or dates. ArcFace itself stays frozen;
-  nothing about detection or grouping changes.
-- Teaching evidence is stored locally, is viewable per person on the People
-  page, and carries no images or embeddings when served; it is excluded from
-  exported learned profiles.
-- A failed training run keeps the previous profile. A passed gate promotes a
-  profile for suggestions and questions only; production grouping still comes
-  from the deterministic pipeline until a future recluster integration.
-- `videre faces --reset` deletes all of it along with your labels.
 
 ## Why grouping runs in two stages
 

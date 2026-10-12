@@ -357,15 +357,20 @@ without that, files of metadata alone would share one key and dedupe would
 offer to delete them. Libraries built before this (schema below 3) are
 refused and rebuilt by a fresh scan; there is no migration.
 
-Schema 4 is the one exception to "no migration": it makes `faces.id`
-`AUTOINCREMENT`, so a face ID is never reused. The learning journal and
-identity questions keep face IDs as history with no foreign key, and a reused
-ID would silently point that history at a different face. A writable open
+Schema 4 was the first exception to "no migration": it makes `faces.id`
+`AUTOINCREMENT`, so a face ID is never reused, and anything that keeps a face
+ID as history cannot be silently pointed at a different face. A writable open
 upgrades schema 3 once (`library_db::upgrade_v3_to_v4`), rebuilding `faces`
-with every ID and reserving the highest ID the journal or questions mention;
-a read-only open refuses. Prune removes faces whose content has no indexed
-path and marks journal events that lost a source face ineligible
-(`face_learning::prune`), keeping the journal itself.
+with every ID and reserving the highest ID any history mentions; a read-only
+open refuses. Prune removes faces whose content has no indexed path and keeps
+the person names.
+
+Face learning was removed in schema 7 (`library_db::upgrade_v6_to_v7` drops its
+tables); the last commit with it is
+`c2e44997`. Naming in the gallery keeps the rules it had with learning off,
+now in `videre_api::{assign_to_person, new_person, remove_face,
+dissolve_cluster}`; `videre_api::assign` stays the lenient upsert XMP readback
+uses.
 
 :warning: **Changing the splitter's spans changes stored keys.** Any change to
 which bytes `content_key` counts as content, including teaching it a format
@@ -845,8 +850,6 @@ above.
   `commands::watch` (`next_mode`)
 - QuickLook conversions share a machine-wide slot pool, waited for before
   spawn -> `videre_core::heic::acquire_slot`
-- Face learning never uses `AppState.conn`: its own connection and thread,
-  off unless `gallery.json` sets `faces.learning` -> `gallery::learning` (module doc)
 - Never open the library database through `std::fs`: closing any descriptor
   on it drops every SQLite lock the process holds, and another process then
   deletes the WAL under a live connection -> `videre_core::library_db::is_sqlite_file`
@@ -857,9 +860,10 @@ above.
 - One capture date per row, every date a local wall clock; schema 5 adds it in
   place and the next scan resolves old rows without rehashing ->
   `videre_core::capture_date`, `videre::sqlite_output::resolve_unresolved`
-- Face IDs are never reused (schema 4); prune keeps the journal and withdraws
-  evidence that lost its source face -> `videre_core::library_db::upgrade_v3_to_v4`,
-  `videre_core::face_learning::prune`
+- Face IDs are never reused (schema 4) -> `videre_core::library_db::upgrade_v3_to_v4`
+- Face learning is gone (schema 7 drops its tables); the gallery's naming rules
+  live in `videre_api` -> `videre_core::library_db::upgrade_v6_to_v7`,
+  `videre_api::assign_to_person`
 - Offline map basemap: one shared PMTiles archive per machine, downloaded once
   behind a cross-process flock; the map grid never gates on MapLibre's load
   (a WebGL probe can pass where the context still cannot render) -> `videre_core::basemap`, `commands::gallery::server` (`handle_basemap_*`), `static/map.js`
