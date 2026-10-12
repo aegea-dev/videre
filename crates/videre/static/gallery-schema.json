@@ -16,8 +16,6 @@
   "routes.events.sort.field": { "section": "events", "label": "Sort by", "type": "enum", "options": ["date", "files", "length", "name"] },
   "routes.events.sort.dir": { "section": "events", "label": "Sort order", "type": "enum", "options": ["desc", "asc"] },
 
-  "faces.learning": { "section": "people", "label": "Face learning", "hint": "Learn from the faces you name and confirm", "type": "bool" },
-  "faces.learningUpdates": { "section": "people", "label": "Learning updates", "hint": "Show what face learning changed", "type": "bool" },
   "routes.people.align": { "section": "people", "label": "Show people", "hint": "Where the people list sits beside the faces", "type": "enum", "options": ["right", "top"] },
   "routes.people.reclusterOpen": { "section": "people", "label": "Recluster row open", "type": "bool" },
   "routes.people.pageSize": { "section": "people", "label": "Page size", "hint": "Faces loaded at a time", "type": "int", "min": 1, "max": 1000 },

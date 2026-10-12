@@ -9,7 +9,7 @@
 //! connection or stall other requests.
 
 use super::refusal::{failed, Refusal};
-use super::server::{guard_operation, internal, poisoned, settings_file, AppState};
+use super::server::{guard_operation, internal, settings_file, AppState};
 use crate::commands::cluster_settings;
 use axum::extract::State;
 use axum::http::StatusCode;
@@ -114,17 +114,6 @@ fn requested(
 pub(crate) async fn handle_cluster_params(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Value>, StatusCode> {
-    // Off, learning contributes nothing, and the row says nothing about it.
-    let learning = if state.learning_enabled() {
-        let conn = state.conn.lock().map_err(poisoned)?;
-        Some(
-            videre_api::face_learning_status(&conn)
-                .map(|s| s.summary)
-                .unwrap_or_default(),
-        )
-    } else {
-        None
-    };
     let state_dir = state.context.library.paths.state.clone();
     tokio::task::spawn_blocking(move || {
         let saved = cluster_settings::saved(&state_dir);
@@ -136,7 +125,6 @@ pub(crate) async fn handle_cluster_params(
             "saved": saved.partial,
             "defaults": ClusteringParameters::default(),
             "warnings": saved.warnings,
-            "learning": learning,
         }))
     })
     .await
@@ -239,23 +227,6 @@ fn apply(state: &AppState, params: ClusteringParameters) -> Result<ReclusterSumm
             );
             result.saved = Some(false);
             result.settings_error = Some(error);
-        }
-    }
-    // New groups and singletons are new subjects for the identity questions.
-    if !state.learning_enabled() {
-        return Ok(result);
-    }
-    match state.conn.lock() {
-        Ok(conn) => {
-            if let Err(e) = videre_api::refresh_identity_questions(
-                &conn,
-                &videre_core::face_learning::QuestionSelectionConfig::default(),
-            ) {
-                tracing::warn!("videre gallery: questions not refreshed after recluster: {e}");
-            }
-        }
-        Err(e) => {
-            poisoned(e);
         }
     }
     Ok(result)

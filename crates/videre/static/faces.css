@@ -111,7 +111,6 @@
 .recluster-actions { display: flex; gap: 6px; margin: 4px 0; }
 .recluster-line { margin: 4px 0 0; font-size: 13px; }
 .recluster-line:empty { display: none; }
-.recluster-learning { color: #3f3f46; }
 /* Info icons: the description floats under the title. Shown on hover, on
    keyboard focus, and pinned by a click or tap (aria-expanded). It takes no
    clicks, so an open one never blocks the field or icon it covers. */
@@ -123,61 +122,5 @@
 .page-body.recluster-busy { opacity: .5; pointer-events: none; }
 /* `display: flex` outranks the `hidden` attribute's default, so both would
    otherwise show while hidden. */
-.recluster-row[hidden], #learning-strip[hidden] { display: none; }
+.recluster-row[hidden] { display: none; }
 
-/* face learning strip, question card, and teaching toast */
-#learning-strip {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 12px;
-  margin: 8px 32px;
-  border: 1px solid #e2e2e2;
-  border-radius: 8px;
-  font-size: 13px;
-  color: #444;
-  background: #fafafa;
-}
-#learning-strip .learning-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #888;
-}
-#learning-strip[data-learning-status="current"] .learning-dot { background: #2e9e5b; }
-#learning-strip[data-learning-status="stale"] .learning-dot { background: #e0a400; }
-#learning-strip[data-learning-status="training"] .learning-dot { background: #3b7ddd; }
-#learning-strip[data-learning-status="failed"] .learning-dot { background: #d64541; }
-
-#question-card {
-  margin: 8px 32px 16px;
-  padding: 14px 16px;
-  border: 1px solid #d8d8d8;
-  border-radius: 10px;
-  background: #fff;
-}
-#question-card .q-head { font-size: 16px; margin-bottom: 10px; }
-#question-card .q-body { display: flex; gap: 16px; align-items: flex-start; }
-#question-card .q-face { width: 96px; height: 96px; object-fit: cover; border-radius: 8px; }
-#question-card .q-side { max-width: 560px; }
-.q-proof { font-size: 12px; color: #555; margin-bottom: 10px; }
-.q-proof-rows { margin-top: 4px; }
-.q-proof-row { display: flex; justify-content: space-between; gap: 16px; }
-.q-proof details { margin-top: 4px; }
-.q-proof summary { cursor: pointer; color: #3b7ddd; }
-.q-actions { display: flex; gap: 8px; }
-.q-msg { font-size: 13px; color: #2e9e5b; min-height: 18px; margin: 6px 0 0; }
-
-#learning-toast {
-  position: fixed;
-  right: 24px;
-  bottom: 24px;
-  padding: 10px 14px;
-  border-radius: 8px;
-  background: #233;
-  color: #fff;
-  font-size: 13px;
-  max-width: 340px;
-  box-shadow: 0 4px 14px rgba(0,0,0,.25);
-  z-index: 60;
-}

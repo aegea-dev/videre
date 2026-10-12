@@ -1460,412 +1460,66 @@ fn browsing_the_gallery_touches_no_model_cache() {
     );
 }
 
-/// Face learning is off unless `gallery.json` turns it on.
-fn enable_learning(lib: &TestLibrary) {
-    std::fs::write(
-        lib.root.join(".videre/gallery.json"),
-        r#"{"faces":{"learning":true}}"#,
-    )
-    .unwrap();
-}
-
+/// Naming a face through the gallery changes that face and nothing else, and
+/// the pages carry no face-learning surface: it left videre.
 #[test]
-fn face_learning_resources_serve_from_a_fresh_library() {
-    let lib = fixture();
-    enable_learning(&lib);
-    let server = Server::start(&lib);
-
-    assert!(
-        videre_core::db::table_exists(&lib.conn(), "face_learning_questions").unwrap(),
-        "gallery startup must prepare question storage before the worker runs"
-    );
-
-    let (status, body) = server.get("/api/face-learning/questions");
-    assert_eq!(status, 200, "{body}");
-    assert_eq!(body.trim(), "[]", "{body}");
-
-    let (status, body) = server.get("/api/face-learning/status");
-    assert_eq!(status, 200, "{body}");
-    assert!(body.contains("\"generation\":0"), "{body}");
-    assert!(body.contains("\"pending_questions\":0"), "{body}");
-
-    let (status, body) = server.get("/api/face-learning/events");
-    assert_eq!(status, 200, "{body}");
-    assert_eq!(body.trim(), "[]", "{body}");
-
-    let (status, body) = server.get("/api/face-learning/events/424242");
-    assert_eq!(status, 404, "{body}");
-
-    let (status, body) = server.send(
-        "POST",
-        "/api/face-learning/questions/424242/answer",
-        "{\"answer\":\"yes\"}",
-    );
-    assert_eq!(status, 404, "{body}");
-
-    let (status, body) = server.send(
-        "POST",
-        "/api/face-learning/questions/424242/answer",
-        "{\"answer\":\"maybe\"}",
-    );
-    assert_eq!(status, 400, "{body}");
-}
-
-#[test]
-fn teaching_mutations_return_acknowledgements_and_advance_the_generation() {
+fn naming_changes_only_the_named_face_and_no_learning_surface_remains() {
     let lib = fixture();
     {
-        // One unassigned face with a real two-dimensional f16 embedding, so
-        // the teaching path can extract membership features for its event.
         let conn = lib.init_db();
-        let mut embedding = Vec::new();
-        embedding.extend_from_slice(&half::f16::from_f32(1.0).to_le_bytes());
-        embedding.extend_from_slice(&half::f16::from_f32(0.0).to_le_bytes());
-        // The fixture face ships a placeholder zero embedding; the teaching
-        // path extracts real membership features, so both faces need valid,
-        // matching-dimension vectors.
-        conn.execute(
-            "UPDATE faces SET embedding = ?1, cluster_id = NULL",
-            rusqlite::params![embedding],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO faces (hash, bbox, embedding, person_label, confirmed)
-             VALUES ('abc123', '0,0,50,50', ?1, NULL, 0)",
-            rusqlite::params![embedding],
-        )
-        .unwrap();
-    }
-    enable_learning(&lib);
-    let server = Server::start(&lib);
-
-    let (status, body) = server.send(
-        "PUT",
-        "/api/people/ozgur_demirtas/faces",
-        "{\"face_ids\":[2]}",
-    );
-    assert_eq!(status, 200, "{body}");
-    assert!(body.contains("\"generation\":1"), "{body}");
-    assert!(body.contains("\"event_ids\":["), "{body}");
-    assert!(!body.contains("embedding"), "{body}");
-
-    // The background worker may have trained (and failed on tiny evidence)
-    // by the time we look; the generation is the contract here.
-    let (status, body) = server.get("/api/face-learning/status");
-    assert_eq!(status, 200, "{body}");
-    assert!(body.contains("\"generation\":1"), "{body}");
-
-    let (status, body) = server.get("/api/face-learning/events");
-    assert_eq!(status, 200, "{body}");
-    assert!(body.contains("\"action\":\"assign_face\""), "{body}");
-    // Provenance and scalar features only: no raw embedding payload.
-    assert!(!body.contains("\"embedding\":"), "{body}");
-    assert!(body.contains("\"target_identity\":"), "{body}");
-
-    let (status, body) = server.get("/api/face-learning/events/1");
-    assert_eq!(status, 200, "{body}");
-    assert!(body.contains("\"faces\":"), "{body}");
-}
-
-#[test]
-fn labeling_pages_carry_the_learning_hooks() {
-    let lib = fixture();
-    let server = Server::start(&lib);
-
-    let (status, body) = server.get("/people");
-    assert_eq!(status, 200, "{body}");
-    assert!(body.contains("data-learning-status"), "{body}");
-    assert!(body.contains("data-learning-question"), "{body}");
-    assert!(body.contains("learning-toast"), "{body}");
-
-    let (status, body) = server.get("/people/person/ozgur_demirtas");
-    assert_eq!(status, 200, "{body}");
-    assert!(body.contains("data-learning-history"), "{body}");
-}
-
-#[test]
-fn face_learning_boundary_only_user_mutations_change_faces() {
-    let lib = fixture();
-    {
-        // Two unassigned singletons with real embeddings, so the teaching
-        // action can extract features and the worker can train or fail.
-        let conn = lib.init_db();
-        let mut embedding = Vec::new();
-        embedding.extend_from_slice(&half::f16::from_f32(1.0).to_le_bytes());
-        embedding.extend_from_slice(&half::f16::from_f32(0.0).to_le_bytes());
-        for id in [2, 3] {
-            conn.execute(
-                "INSERT INTO faces (id, hash, bbox, embedding, person_label, confirmed)
-                 VALUES (?1, 'abc123', '0,0,50,50', ?2, NULL, 0)",
-                rusqlite::params![id, embedding],
-            )
+        conn.execute("UPDATE faces SET cluster_id = NULL", [])
             .unwrap();
-        }
         conn.execute(
-            "UPDATE faces SET embedding = ?1, cluster_id = NULL",
-            rusqlite::params![embedding],
+            "INSERT INTO faces (id, hash, bbox, embedding, person_label, confirmed)
+             VALUES (2, 'abc123', '0,0,50,50', X'0000', NULL, 0),
+                    (3, 'abc123', '0,0,50,50', X'0000', NULL, 0)",
+            [],
         )
         .unwrap();
     }
-    enable_learning(&lib);
-    let server = Server::start(&lib);
-
-    let face_rows =
-        |conn: &rusqlite::Connection| -> Vec<(i64, Option<i64>, Option<String>, i64, i64)> {
-            let mut statement = conn
-                .prepare(
-                    "SELECT id, cluster_id, person_label, confirmed, is_primary
-                      FROM faces ORDER BY id",
-                )
-                .unwrap();
-            statement
-                .query_map([], |row| {
-                    Ok((
-                        row.get(0)?,
-                        row.get(1)?,
-                        row.get(2)?,
-                        row.get(3)?,
-                        row.get(4)?,
-                    ))
-                })
-                .unwrap()
-                .collect::<Result<Vec<_>, _>>()
-                .unwrap()
-        };
-    let before = {
-        let conn = lib.init_db();
-        face_rows(&conn)
-    };
-
-    // The user mutation: assign one singleton. Exactly that face changes.
-    let (status, body) = server.send(
-        "PUT",
-        "/api/people/ozgur_demirtas/faces",
-        "{\"face_ids\":[2]}",
-    );
-    assert_eq!(status, 200, "{body}");
-    assert!(body.contains("\"generation\":1"), "{body}");
-
-    // Wait until the background worker settles (it may succeed, fail, or wait
-    // for more feedback on this tiny evidence; either way it must not touch
-    // faces). A worker that
-    // never settles fails the test instead of letting it pass unobserved.
-    // Training starts after a 10 s quiet window.
-    let deadline = Instant::now() + Duration::from_secs(60);
-    loop {
-        let (_, status_body) = server.get("/api/face-learning/status");
-        let settled = status_body.contains("\"status\":\"current\"")
-            || status_body.contains("\"status\":\"failed\"")
-            || status_body.contains("\"status\":\"waiting\"");
-        if settled {
-            break;
-        }
-        assert!(
-            Instant::now() < deadline,
-            "the background worker never settled: {status_body}"
-        );
-        std::thread::sleep(Duration::from_millis(100));
-    }
-
-    {
-        let conn = lib.init_db();
-        let after = face_rows(&conn);
-        assert_eq!(after.len(), before.len(), "no face rows added or deleted");
-        for (was, is) in before.iter().zip(&after) {
-            assert_eq!(was.0, is.0);
-            if was.0 == 2 {
-                // Only the explicitly named face may change.
-                assert_eq!(is.2.as_deref(), Some("ozgur_demirtas"));
-                assert_eq!(is.3, 1);
-                assert_eq!(is.1, None, "assigning detaches the machine cluster");
-            } else {
-                assert_eq!(was, is, "no other face row may move");
-            }
-        }
-    }
-}
-
-/// Learning is off by default: naming works the same and records nothing,
-/// and the learning resources say so.
-#[test]
-fn face_learning_is_off_by_default() {
-    let lib = fixture();
-    {
-        let conn = lib.init_db();
-        let mut embedding = Vec::new();
-        embedding.extend_from_slice(&half::f16::from_f32(1.0).to_le_bytes());
-        embedding.extend_from_slice(&half::f16::from_f32(0.0).to_le_bytes());
-        conn.execute(
-            "UPDATE faces SET embedding = ?1, cluster_id = NULL",
-            rusqlite::params![embedding],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO faces (hash, bbox, embedding, person_label, confirmed)
-             VALUES ('abc123', '0,0,50,50', ?1, NULL, 0)",
-            rusqlite::params![embedding],
-        )
-        .unwrap();
-    }
-    let server = Server::start(&lib);
-
-    let (status, body) = server.send(
-        "PUT",
-        "/api/people/ozgur_demirtas/faces",
-        "{\"face_ids\":[2]}",
-    );
-    assert_eq!(status, 200, "{body}");
-    assert!(body.contains("\"event_ids\":[]"), "{body}");
-    assert!(body.contains("\"message_key\":\"learning_off\""), "{body}");
-    let named: Option<String> = lib
-        .conn()
-        .query_row("SELECT person_label FROM faces WHERE id = 2", [], |row| {
-            row.get(0)
-        })
-        .unwrap();
-    assert_eq!(
-        named.as_deref(),
-        Some("ozgur_demirtas"),
-        "the name is stored"
-    );
-    let events: i64 = lib
-        .conn()
-        .query_row("SELECT count(*) FROM face_learning_events", [], |row| {
-            row.get(0)
-        })
-        .unwrap();
-    assert_eq!(events, 0, "nothing is recorded while learning is off");
-
-    let (status, body) = server.get("/api/face-learning/status");
-    assert_eq!(status, 200, "{body}");
-    assert!(body.contains("\"enabled\":false"), "{body}");
-    assert!(body.contains("\"generation\":0"), "{body}");
-
-    let (status, body) = server.get("/api/face-learning/questions");
-    assert_eq!(status, 200, "{body}");
-    assert_eq!(body.trim(), "[]", "{body}");
-
-    let (status, body) = server.send(
-        "POST",
-        "/api/face-learning/questions/1/answer",
-        "{\"answer\":\"yes\"}",
-    );
-    assert_eq!(status, 503, "{body}");
-
-    let (status, body) = server.get("/api/faces/cluster-params");
-    assert_eq!(status, 200, "{body}");
-    assert!(body.contains("\"learning\":null"), "{body}");
-}
-
-/// A 512-dim f16 embedding near `center`, as the faces table stores one.
-/// Deterministic noise, so the run is repeatable.
-fn face_embedding(center: usize, seed: u64) -> Vec<u8> {
-    let mut state = seed
-        .wrapping_mul(6364136223846793005)
-        .wrapping_add(1442695040888963407);
-    let mut values = [0f32; 512];
-    for value in values.iter_mut() {
-        state = state
-            .wrapping_mul(6364136223846793005)
-            .wrapping_add(1442695040888963407);
-        *value = ((state >> 40) as f32 / (1u64 << 24) as f32 - 0.5) * 0.2;
-    }
-    values[center] += 1.0;
-    let norm = values.iter().map(|v| v * v).sum::<f32>().sqrt();
-    values
-        .iter()
-        .flat_map(|v| half::f16::from_f32(v / norm).to_le_bytes())
-        .collect()
-}
-
-/// The freeze this change fixed: a training run on a person with many faces
-/// spent seconds building its snapshot while holding the connection every
-/// request shares, so the whole gallery stopped answering. Learning on, one
-/// person large enough that the build takes seconds, a cluster named: every
-/// request keeps answering quickly while the run is in progress.
-#[test]
-fn a_training_run_never_holds_up_requests() {
-    const PERSON_FACES: u64 = 400;
-    let lib = fixture();
-    {
-        let conn = lib.init_db();
-        conn.execute(
-            "UPDATE faces SET embedding = ?1, cluster_id = NULL",
-            rusqlite::params![face_embedding(0, 0)],
-        )
-        .unwrap();
-        conn.execute_batch("BEGIN").unwrap();
-        for seed in 1..PERSON_FACES {
-            conn.execute(
-                "INSERT INTO faces (hash, bbox, embedding, person_label, confirmed, det_score, blur)
-                 VALUES ('abc123', '0,0,50,50', ?1, 'ozgur_demirtas', 1, 0.9, 600.0)",
-                rusqlite::params![face_embedding(0, seed)],
-            )
-            .unwrap();
-        }
-        // A new person's cluster, named below.
-        for seed in 0..3 {
-            conn.execute(
-                "INSERT INTO faces (hash, bbox, embedding, cluster_id, confirmed, det_score, blur)
-                 VALUES ('abc123', '0,0,50,50', ?1, 77, 0, 0.9, 600.0)",
-                rusqlite::params![face_embedding(1, 10_000 + seed)],
-            )
-            .unwrap();
-        }
-        conn.execute_batch("COMMIT").unwrap();
-    }
-    let cluster: Vec<i64> = {
-        let conn = lib.conn();
+    let face_rows = |conn: &rusqlite::Connection| -> Vec<(i64, Option<i64>, Option<String>, i64)> {
         let mut statement = conn
-            .prepare("SELECT id FROM faces WHERE cluster_id = 77 ORDER BY id")
+            .prepare("SELECT id, cluster_id, person_label, confirmed FROM faces ORDER BY id")
             .unwrap();
-        let ids = statement
-            .query_map([], |row| row.get(0))
+        statement
+            .query_map([], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+            })
             .unwrap()
-            .collect::<Result<Vec<i64>, _>>()
-            .unwrap();
-        ids
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap()
     };
-    enable_learning(&lib);
+    let before = face_rows(&lib.conn());
     let server = Server::start(&lib);
 
     let (status, body) = server.send(
-        "POST",
-        "/api/people",
-        &format!("{{\"name\":\"Şebnem\",\"face_ids\":{cluster:?}}}"),
+        "PUT",
+        "/api/people/ozgur_demirtas/faces",
+        "{\"face_ids\":[2]}",
     );
     assert_eq!(status, 200, "{body}");
-
-    let mut saw_training = false;
-    let mut slowest = Duration::ZERO;
-    let deadline = Instant::now() + Duration::from_secs(120);
-    loop {
-        for path in ["/api/faces", "/api/face-learning/status"] {
-            let began = Instant::now();
-            let (status, body) = server.get(path);
-            let took = began.elapsed();
-            assert_eq!(status, 200, "{path}: {body}");
-            slowest = slowest.max(took);
-            assert!(
-                took < Duration::from_millis(500),
-                "{path} took {took:?} while learning ran"
+    let after = face_rows(&lib.conn());
+    assert_eq!(after.len(), before.len());
+    for (was, is) in before.iter().zip(&after) {
+        if was.0 == 2 {
+            assert_eq!(
+                (is.1, is.2.as_deref(), is.3),
+                (None, Some("ozgur_demirtas"), 1)
             );
-            if path.ends_with("status") {
-                if body.contains("\"status\":\"training\"") {
-                    saw_training = true;
-                } else if saw_training && !body.contains("\"status\":\"stale\"") {
-                    // Settled after a run we watched.
-                    eprintln!("slowest response during training: {slowest:?}");
-                    return;
-                }
-            }
+        } else {
+            assert_eq!(was, is, "no other face row may move");
         }
-        assert!(
-            Instant::now() < deadline,
-            "training never ran or never settled (saw training: {saw_training})"
-        );
-        std::thread::sleep(Duration::from_millis(50));
     }
+
+    let (status, _) = server.get("/api/face-learning/status");
+    assert_eq!(status, 404);
+    let (_, body) = server.get("/people");
+    assert!(!body.contains("data-learning"), "{body}");
+    assert!(!body.contains("question-card"), "{body}");
+    let (_, body) = server.get("/people/person/ozgur_demirtas");
+    assert!(!body.contains("learning-history"), "{body}");
+    let (_, body) = server.get("/api/faces/cluster-params");
+    assert!(!body.contains("\"learning\""), "{body}");
 }
 
 /// The duplicates page shows a Google Takeout edit beside its original, the
@@ -2188,18 +1842,12 @@ fn faces_leave_people_and_clusters_dissolve_over_http() {
 
     let (status, body) = server.send("DELETE", "/api/people/ozgur_demirtas", "");
     assert_eq!(status, 200, "{body}");
-    assert_eq!(json(&body)["message_key"], "person_removed", "{body}");
     let (_, body) = server.get("/api/people/ozgur_demirtas");
     assert_eq!(json(&body)["faces"], serde_json::json!([]), "{body}");
 
-    // A second delete finds nobody and says so.
+    // A second delete finds nobody, which is not an error.
     let (status, body) = server.send("DELETE", "/api/people/ozgur_demirtas", "");
     assert_eq!(status, 200, "{body}");
-    assert_eq!(
-        json(&body)["message_key"],
-        "person_deleted_without_learning",
-        "{body}"
-    );
 }
 
 #[test]

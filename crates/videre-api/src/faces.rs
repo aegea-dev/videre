@@ -1,24 +1,11 @@
-//! Facade over videre's faces-labeling read operations. Plain functions over
-//! an open `rusqlite::Connection`, returning serde types and a shared
-//! `Error`. Called by the axum `--faces` server and any other embedder.
+//! Facade over videre's faces-labeling operations. Plain functions over an
+//! open `rusqlite::Connection`, returning serde types and a shared `Error`.
+//! Called by the gallery server, XMP readback and any other embedder.
 
 use crate::error::{Error, Result};
 use crate::types::*;
-use rusqlite::{Connection, OptionalExtension};
+use rusqlite::Connection;
 use std::collections::{BTreeSet, HashMap};
-use videre_core::face_db::load_face_observations;
-use videre_core::face_learning::{
-    active_question_context, append_event_batch_in_transaction, extract_cluster_quality_features,
-    extract_membership_features, finish_question_in_transaction,
-    invalidate_identity_for_removal_in_transaction, learning_state, list_learning_events,
-    list_pending_questions, question_evidence_revision, replace_pending_questions,
-    select_questions, stored_question, DecisionStage, EventFaceRef, EventFaceRole, LearningAction,
-    LearningDecisionKind, LearningOutcome, NewLearningEvent, QuestionAnswer,
-    QuestionSelectionConfig, QuestionStatus,
-};
-
-const MAX_MEMBERSHIP_EVENTS_PER_ACTION: usize = 8;
-const MAX_SUPPORT_FACES: usize = 8;
 
 #[derive(Debug)]
 struct FaceState {
@@ -88,102 +75,6 @@ fn unassigned_cluster_ids(conn: &Connection, cluster_id: i64) -> Result<Vec<i64>
         .query_map([cluster_id], |row| row.get(0))?
         .collect::<rusqlite::Result<_>>()?;
     Ok(ids)
-}
-
-fn person_support_ids(conn: &Connection, identity: &str, excluded: &[i64]) -> Result<Vec<i64>> {
-    let excluded: BTreeSet<_> = excluded.iter().copied().collect();
-    let mut statement = conn.prepare(
-        "SELECT id FROM faces
-         WHERE person_label = ?1 AND confirmed = 1 AND cluster_id IS NULL
-         ORDER BY is_primary DESC, id ASC",
-    )?;
-    let ids = statement
-        .query_map([identity], |row| row.get(0))?
-        .collect::<rusqlite::Result<Vec<i64>>>()?
-        .into_iter()
-        .filter(|id| !excluded.contains(id))
-        .take(MAX_SUPPORT_FACES)
-        .collect();
-    Ok(ids)
-}
-
-fn event_faces(subject: &[i64], support: &[i64], support_role: EventFaceRole) -> Vec<EventFaceRef> {
-    subject
-        .iter()
-        .enumerate()
-        .map(|(ordinal, face_id)| EventFaceRef {
-            face_id: *face_id,
-            role: EventFaceRole::Subject,
-            ordinal: ordinal as u32,
-        })
-        .chain(
-            support
-                .iter()
-                .enumerate()
-                .map(|(ordinal, face_id)| EventFaceRef {
-                    face_id: *face_id,
-                    role: support_role,
-                    ordinal: ordinal as u32,
-                }),
-        )
-        .collect()
-}
-
-fn membership_event(
-    conn: &Connection,
-    subject_ids: &[i64],
-    support_ids: &[i64],
-    action: LearningAction,
-    outcome: LearningOutcome,
-    target_identity: Option<String>,
-    context: &TeachingContext,
-    stage: DecisionStage,
-) -> Result<NewLearningEvent> {
-    let subject = load_face_observations(conn, subject_ids)?;
-    let support = load_face_observations(conn, support_ids)?;
-    Ok(NewLearningEvent {
-        action,
-        decision_kind: LearningDecisionKind::Membership,
-        outcome,
-        embedding_model_id: context.embedding_model_id.clone(),
-        active_profile_id: context.active_profile_id,
-        target_identity,
-        features: extract_membership_features(&subject, &support, stage)?,
-        support_count: support.len() as u32,
-        scorer_confidence: None,
-        faces: event_faces(subject_ids, support_ids, EventFaceRole::TargetSupport),
-    })
-}
-
-fn cluster_event(
-    conn: &Connection,
-    face_ids: &[i64],
-    action: LearningAction,
-    outcome: LearningOutcome,
-    target_identity: Option<String>,
-    context: &TeachingContext,
-) -> Result<NewLearningEvent> {
-    let cluster = load_face_observations(conn, face_ids)?;
-    Ok(NewLearningEvent {
-        action,
-        decision_kind: LearningDecisionKind::ClusterQuality,
-        outcome,
-        embedding_model_id: context.embedding_model_id.clone(),
-        active_profile_id: context.active_profile_id,
-        target_identity,
-        features: extract_cluster_quality_features(&cluster, DecisionStage::GalleryCluster)?,
-        support_count: cluster.len() as u32,
-        scorer_confidence: None,
-        faces: face_ids
-            .iter()
-            .enumerate()
-            .map(|(ordinal, face_id)| EventFaceRef {
-                face_id: *face_id,
-                role: EventFaceRole::ClusterMember,
-                ordinal: ordinal as u32,
-            })
-            .collect(),
-    })
 }
 
 /// Whether detection has ever run against this library.
@@ -517,7 +408,7 @@ fn assign_in_transaction(
     Ok(())
 }
 
-fn validate_teaching_subject(conn: &Connection, face_ids: &[i64]) -> Result<Vec<FaceState>> {
+fn validate_subject(conn: &Connection, face_ids: &[i64]) -> Result<Vec<FaceState>> {
     let states = face_states(conn, face_ids)?;
     if let Some(state) = states
         .iter()
@@ -554,185 +445,54 @@ fn validate_teaching_subject(conn: &Connection, face_ids: &[i64]) -> Result<Vec<
     Ok(states)
 }
 
-fn assignment_events(
-    conn: &Connection,
-    states: &[FaceState],
-    identity: &str,
-    existing_support: &[i64],
-    context: &TeachingContext,
-    creating_person: bool,
-) -> Result<Vec<NewLearningEvent>> {
-    let ids: Vec<_> = states.iter().map(|state| state.id).collect();
-    let clustered = ids.len() > 1;
-    if !clustered && creating_person {
-        // One newly named face contains identity truth but no relationship to
-        // score. Persisting self-similarity would be a tautological positive,
-        // so this action deliberately waits for a later supported assignment.
-        load_face_observations(conn, &ids)?;
-        return Ok(Vec::new());
-    }
-    let action = match (creating_person, clustered) {
-        (true, true) => LearningAction::LabelCluster,
-        (true, false) => LearningAction::CreatePerson,
-        (false, true) => LearningAction::AssignCluster,
-        (false, false) => LearningAction::AssignFace,
-    };
-    let mut events = Vec::new();
-    if clustered {
-        events.push(cluster_event(
-            conn,
-            &ids,
-            action,
-            LearningOutcome::Positive,
-            Some(identity.to_owned()),
-            context,
-        )?);
-    }
-    if creating_person {
-        for (index, subject) in ids
-            .iter()
-            .copied()
-            .take(MAX_MEMBERSHIP_EVENTS_PER_ACTION)
-            .enumerate()
-        {
-            let support: Vec<_> = ids
-                .iter()
-                .copied()
-                .filter(|id| *id != subject)
-                .cycle()
-                .skip(index.min(ids.len().saturating_sub(1)))
-                .take(ids.len().saturating_sub(1).min(MAX_SUPPORT_FACES))
-                .collect();
-            events.push(membership_event(
-                conn,
-                &[subject],
-                &support,
-                action,
-                LearningOutcome::Positive,
-                Some(identity.to_owned()),
-                context,
-                DecisionStage::GalleryCluster,
-            )?);
-        }
-    } else if !existing_support.is_empty() {
-        for subject in ids.iter().copied().take(MAX_MEMBERSHIP_EVENTS_PER_ACTION) {
-            events.push(membership_event(
-                conn,
-                &[subject],
-                existing_support,
-                action,
-                LearningOutcome::Positive,
-                Some(identity.to_owned()),
-                context,
-                if clustered {
-                    DecisionStage::GalleryCluster
-                } else {
-                    DecisionStage::GallerySingleton
-                },
-            )?);
-        }
-    }
-    Ok(events)
+fn person_exists(conn: &Connection, identity: &str) -> Result<bool> {
+    Ok(conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM people WHERE name = ?1)",
+        [identity],
+        |row| row.get(0),
+    )?)
 }
 
-/// The acknowledgement of a mutation made while face learning is off: the
-/// face writes happened, nothing was recorded.
-fn learning_off(conn: &Connection) -> Result<LearningAcknowledgement> {
-    Ok(LearningAcknowledgement {
-        generation: learning_state(conn)?.generation,
-        event_ids: Vec::new(),
-        message_key: "learning_off".to_owned(),
-    })
-}
-
-fn assign_teaching(
-    conn: &Connection,
-    face_ids: &[i64],
-    person_label: &str,
-    context: &TeachingContext,
-    creating_person: bool,
-) -> Result<LearningAcknowledgement> {
-    if context.embedding_model_id.trim().is_empty() {
-        return Err(Error::Invalid);
-    }
+/// Name faces as a person who already exists, the way the gallery does: the
+/// faces must be unnamed, and several faces must be one cluster's whole
+/// unassigned group. Unlike `assign`, it never creates the person.
+pub fn assign_to_person(conn: &Connection, face_ids: &[i64], person_label: &str) -> Result<()> {
     let display = crate::label::sanitize_person_label(person_label).ok_or(Error::Invalid)?;
     let identity = videre_core::person::normalize(&display).ok_or(Error::Invalid)?;
     immediate_transaction(conn, || {
-        let states = validate_teaching_subject(conn, face_ids)?;
-        let person_exists = conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM people WHERE name = ?1)",
-            [&identity],
-            |row| row.get::<_, bool>(0),
-        )?;
-        let creating_person = creating_person && !person_exists;
-        let support = if creating_person {
-            Vec::new()
-        } else {
-            if !person_exists {
-                return Err(Error::NotFound);
-            }
-            person_support_ids(conn, &identity, face_ids)?
-        };
-        if !context.record {
-            assign_in_transaction(conn, face_ids, &identity, &display)?;
-            return learning_off(conn);
+        validate_subject(conn, face_ids)?;
+        if !person_exists(conn, &identity)? {
+            return Err(Error::NotFound);
         }
-        let events =
-            assignment_events(conn, &states, &identity, &support, context, creating_person)?;
-        assign_in_transaction(conn, face_ids, &identity, &display)?;
-        if events.is_empty() {
-            let state = learning_state(conn)?;
-            return Ok(LearningAcknowledgement {
-                generation: state.generation,
-                event_ids: Vec::new(),
-                message_key: "face_named_without_comparison".to_owned(),
-            });
-        }
-        let receipt = append_event_batch_in_transaction(conn, &events)?;
-        Ok(LearningAcknowledgement {
-            generation: receipt.generation,
-            event_ids: receipt.event_ids,
-            message_key: if states.len() > 1 {
-                "cluster_confirmed"
-            } else {
-                "membership_confirmed"
-            }
-            .to_owned(),
-        })
+        assign_in_transaction(conn, face_ids, &identity, &display)
     })
 }
 
-pub fn assign_with_learning(
-    conn: &Connection,
-    face_ids: &[i64],
-    person_label: &str,
-    context: &TeachingContext,
-) -> Result<LearningAcknowledgement> {
-    assign_teaching(conn, face_ids, person_label, context, false)
-}
-
-pub fn new_person_with_learning(
-    conn: &Connection,
-    face_ids: &[i64],
-    person_label: &str,
-    context: &TeachingContext,
-) -> Result<LearningAcknowledgement> {
-    assign_teaching(conn, face_ids, person_label, context, true)
-}
-
-/// Create a person from faces. Same effect as `assign`; kept as a distinct
-/// operation because callers treat "new person" and "assign to existing" as
-/// separate user intents.
-pub fn new_person(conn: &Connection, face_ids: &[i64], label: &str) -> Result<()> {
-    assign(conn, face_ids, label)
+/// Name faces as a new person, under the rules of `assign_to_person`. A name
+/// that already exists joins that person.
+pub fn new_person(conn: &Connection, face_ids: &[i64], person_label: &str) -> Result<()> {
+    let display = crate::label::sanitize_person_label(person_label).ok_or(Error::Invalid)?;
+    let identity = videre_core::person::normalize(&display).ok_or(Error::Invalid)?;
+    immediate_transaction(conn, || {
+        validate_subject(conn, face_ids)?;
+        assign_in_transaction(conn, face_ids, &identity, &display)
+    })
 }
 
 /// Reset one face to fully unassigned (cluster, label, confirmed, primary).
+/// Only a named face outside a cluster, or an unnamed face in one, can be
+/// taken off: anything else is not a state the gallery shows.
 pub fn remove_face(conn: &Connection, face_id: i64) -> Result<()> {
-    // A face id from the client that matches no row is `Ok(0)`, not an error;
-    // reported as success it would tell the UI a face was reset that never
-    // existed.
-    remove_face_in_transaction(conn, face_id)
+    immediate_transaction(conn, || {
+        let state = face_states(conn, &[face_id])?.remove(0);
+        let named = state.confirmed && state.person_label.is_some() && state.cluster_id.is_none();
+        let clustered =
+            !state.confirmed && state.person_label.is_none() && state.cluster_id.is_some();
+        if !(named || clustered) {
+            return Err(Error::Invalid);
+        }
+        remove_face_in_transaction(conn, face_id)
+    })
 }
 
 fn remove_face_in_transaction(conn: &Connection, face_id: i64) -> Result<()> {
@@ -746,97 +506,27 @@ fn remove_face_in_transaction(conn: &Connection, face_id: i64) -> Result<()> {
     Ok(())
 }
 
-pub fn remove_face_with_learning(
-    conn: &Connection,
-    face_id: i64,
-    context: &TeachingContext,
-) -> Result<LearningAcknowledgement> {
-    if context.embedding_model_id.trim().is_empty() {
-        return Err(Error::Invalid);
-    }
-    immediate_transaction(conn, || {
-        let state = face_states(conn, &[face_id])?.remove(0);
-        if !context.record {
-            let named =
-                state.confirmed && state.person_label.is_some() && state.cluster_id.is_none();
-            let clustered =
-                !state.confirmed && state.person_label.is_none() && state.cluster_id.is_some();
-            if !(named || clustered) {
-                return Err(Error::Invalid);
-            }
-            remove_face_in_transaction(conn, face_id)?;
-            return learning_off(conn);
-        }
-        let (action, support, identity, stage) =
-            if state.confirmed && state.person_label.is_some() && state.cluster_id.is_none() {
-                let identity = state.person_label.clone().ok_or(Error::Invalid)?;
-                let support = person_support_ids(conn, &identity, &[face_id])?;
-                if support.is_empty() {
-                    remove_face_in_transaction(conn, face_id)?;
-                    let generation = learning_state(conn)?.generation;
-                    return Ok(LearningAcknowledgement {
-                        generation,
-                        event_ids: Vec::new(),
-                        message_key: "face_removed_without_comparison".to_owned(),
-                    });
-                }
-                (
-                    LearningAction::RemoveFaceFromPerson,
-                    support,
-                    Some(identity),
-                    DecisionStage::GallerySingleton,
-                )
-            } else if !state.confirmed && state.person_label.is_none() {
-                let cluster_id = state.cluster_id.ok_or(Error::Invalid)?;
-                let support: Vec<_> = unassigned_cluster_ids(conn, cluster_id)?
-                    .into_iter()
-                    .filter(|id| *id != face_id)
-                    .take(MAX_SUPPORT_FACES)
-                    .collect();
-                if support.is_empty() {
-                    remove_face_in_transaction(conn, face_id)?;
-                    let generation = learning_state(conn)?.generation;
-                    return Ok(LearningAcknowledgement {
-                        generation,
-                        event_ids: Vec::new(),
-                        message_key: "face_removed_without_comparison".to_owned(),
-                    });
-                }
-                (
-                    LearningAction::RemoveFaceFromCluster,
-                    support,
-                    None,
-                    DecisionStage::GalleryCluster,
-                )
-            } else {
-                return Err(Error::Invalid);
-            };
-        let event = membership_event(
-            conn,
-            &[face_id],
-            &support,
-            action,
-            LearningOutcome::Negative,
-            identity,
-            context,
-            stage,
-        )?;
-        remove_face_in_transaction(conn, face_id)?;
-        let receipt = append_event_batch_in_transaction(conn, &[event])?;
-        Ok(LearningAcknowledgement {
-            generation: receipt.generation,
-            event_ids: receipt.event_ids,
-            message_key: "membership_corrected".to_owned(),
-        })
-    })
-}
-
-/// Ungroup a bad cluster: its faces become unassigned singletons (not deleted).
+/// Ungroup a bad cluster: its faces become unassigned singletons (not
+/// deleted). Every face in it must be unassigned, and a cluster is at least
+/// two faces.
 pub fn dissolve_cluster(conn: &Connection, cluster_id: i64) -> Result<()> {
-    // A cluster id from the client that matches no row is `Ok(0)`, not an error;
-    // reported as success it would tell the UI a cluster was ungrouped that
-    // never existed.
-    dissolve_cluster_in_transaction(conn, cluster_id)
+    immediate_transaction(conn, || {
+        let face_ids = unassigned_cluster_ids(conn, cluster_id)?;
+        let all_faces: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM faces WHERE cluster_id = ?1",
+            [cluster_id],
+            |row| row.get(0),
+        )?;
+        if all_faces != face_ids.len() as i64 {
+            return Err(Error::Invalid);
+        }
+        match face_ids.len() {
+            0 => return Err(Error::NotFound),
+            1 => return Err(Error::Invalid),
+            _ => {}
+        }
+        dissolve_cluster_in_transaction(conn, cluster_id)
+    })
 }
 
 fn dissolve_cluster_in_transaction(conn: &Connection, cluster_id: i64) -> Result<()> {
@@ -848,53 +538,6 @@ fn dissolve_cluster_in_transaction(conn: &Connection, cluster_id: i64) -> Result
         return Err(Error::NotFound);
     }
     Ok(())
-}
-
-pub fn dissolve_cluster_with_learning(
-    conn: &Connection,
-    cluster_id: i64,
-    context: &TeachingContext,
-) -> Result<LearningAcknowledgement> {
-    if context.embedding_model_id.trim().is_empty() {
-        return Err(Error::Invalid);
-    }
-    immediate_transaction(conn, || {
-        let face_ids = unassigned_cluster_ids(conn, cluster_id)?;
-        let all_faces: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM faces WHERE cluster_id = ?1",
-            [cluster_id],
-            |row| row.get(0),
-        )?;
-        if all_faces != face_ids.len() as i64 {
-            return Err(Error::Invalid);
-        }
-        if face_ids.len() < 2 {
-            return if face_ids.is_empty() {
-                Err(Error::NotFound)
-            } else {
-                Err(Error::Invalid)
-            };
-        }
-        if !context.record {
-            dissolve_cluster_in_transaction(conn, cluster_id)?;
-            return learning_off(conn);
-        }
-        let event = cluster_event(
-            conn,
-            &face_ids,
-            LearningAction::DissolveCluster,
-            LearningOutcome::Negative,
-            None,
-            context,
-        )?;
-        dissolve_cluster_in_transaction(conn, cluster_id)?;
-        let receipt = append_event_batch_in_transaction(conn, &[event])?;
-        Ok(LearningAcknowledgement {
-            generation: receipt.generation,
-            event_ids: receipt.event_ids,
-            message_key: "cluster_dissolved".to_owned(),
-        })
-    })
 }
 
 /// Reset every face of a person back to unassigned. Deliberately does NOT touch
@@ -946,533 +589,6 @@ fn delete_person_in_transaction(conn: &Connection, identity: &str) -> Result<usi
     Ok(changed)
 }
 
-pub fn delete_person_with_learning(
-    conn: &Connection,
-    label: &str,
-) -> Result<Option<LearningAcknowledgement>> {
-    let identity = videre_core::person::normalize(label).ok_or(Error::Invalid)?;
-    immediate_transaction(conn, || {
-        let changed = delete_person_in_transaction(conn, &identity)?;
-        if changed == 0 {
-            return Ok(None);
-        }
-        let generation = invalidate_identity_for_removal_in_transaction(conn, &identity)?;
-        Ok(Some(LearningAcknowledgement {
-            generation,
-            event_ids: Vec::new(),
-            message_key: "person_removed".to_owned(),
-        }))
-    })
-}
-
-/// Answer one pending identity question. Yes confirms the subject cluster as
-/// the target person and teaches one positive membership; No teaches one
-/// negative membership without labeling; Skip only changes delivery state.
-/// Every answer revalidates subject, target, active profile, and evidence
-/// revision inside the transaction. Drift supersedes the stale question and
-/// returns Conflict without writing a label or teaching event.
-pub fn answer_question_with_learning(
-    conn: &Connection,
-    question_id: i64,
-    answer: QuestionAnswer,
-    context: &TeachingContext,
-) -> Result<QuestionAnswerOutcome> {
-    if context.embedding_model_id.trim().is_empty() {
-        return Err(Error::Invalid);
-    }
-    let outcome = immediate_transaction(conn, || {
-        let question = stored_question(conn, question_id)?;
-        let question = match question {
-            Some(question) if question.status == QuestionStatus::Pending => question,
-            _ => return Err(Error::NotFound),
-        };
-        let supersede = || {
-            finish_question_in_transaction(conn, question_id, QuestionStatus::Superseded)?;
-            Ok(None)
-        };
-        let states = match face_states(conn, &question.subject_face_ids) {
-            Ok(states) => states,
-            Err(Error::NotFound) => return supersede(),
-            Err(error) => return Err(error),
-        };
-        if states
-            .iter()
-            .any(|state| state.confirmed || state.person_label.is_some())
-        {
-            return supersede();
-        }
-        // Every subject face must still sit in the cluster the question was
-        // built from; a recluster that moved any of them invalidates the
-        // evidence and the question.
-        if states
-            .iter()
-            .any(|state| state.cluster_id != Some(question.cluster_id))
-        {
-            return supersede();
-        }
-        let display: String = match conn.query_row(
-            "SELECT full_name FROM people WHERE name = ?1",
-            [&question.target_identity],
-            |row| row.get(0),
-        ) {
-            Ok(display) => display,
-            Err(rusqlite::Error::QueryReturnedNoRows) => return supersede(),
-            Err(error) => return Err(error.into()),
-        };
-        let active = active_question_context(conn)?;
-        let Some(active) = active else {
-            return supersede();
-        };
-        if active.profile_id != question.profile_id || active.model_kind != question.model_kind {
-            return supersede();
-        }
-        let representative: i64 = match conn.query_row(
-            "SELECT f.id FROM faces AS f
-                 JOIN face_learning_question_faces AS qf
-                   ON qf.face_id = f.id AND qf.question_id = ?1 AND qf.role = 'subject'
-                 WHERE f.confirmed = 0 AND f.person_label IS NULL
-                 ORDER BY f.is_primary DESC, f.det_score DESC, f.id ASC
-                 LIMIT 1",
-            [question_id],
-            |row| row.get(0),
-        ) {
-            Ok(representative) => representative,
-            Err(rusqlite::Error::QueryReturnedNoRows) => return supersede(),
-            Err(error) => return Err(error.into()),
-        };
-        let support = person_support_ids(conn, &question.target_identity, &[])?;
-        let subject_observation = load_face_observations(conn, &[representative])?;
-        let support_observation = load_face_observations(conn, &support)?;
-        let features = extract_membership_features(
-            &subject_observation,
-            &support_observation,
-            DecisionStage::Question,
-        )?;
-        let revision = question_evidence_revision(
-            question.profile_id,
-            question.model_kind.as_str(),
-            &question.subject_face_ids,
-            &question.target_identity,
-            &features,
-            active.membership_threshold,
-            &support,
-        );
-        if revision != question.evidence_revision {
-            return supersede();
-        }
-        match answer {
-            QuestionAnswer::Skip => {
-                finish_question_in_transaction(conn, question_id, QuestionStatus::Skipped)?;
-                Ok(Some(QuestionAnswerOutcome {
-                    status: "skipped".into(),
-                    acknowledgement: None,
-                }))
-            }
-            QuestionAnswer::Yes => {
-                assign_in_transaction(
-                    conn,
-                    &question.subject_face_ids,
-                    &question.target_identity,
-                    &display,
-                )?;
-                let event = membership_event(
-                    conn,
-                    &[representative],
-                    &support,
-                    LearningAction::QuestionYes,
-                    LearningOutcome::Positive,
-                    Some(question.target_identity.clone()),
-                    context,
-                    DecisionStage::Question,
-                )?;
-                let receipt = append_event_batch_in_transaction(conn, &[event])?;
-                finish_question_in_transaction(conn, question_id, QuestionStatus::Answered)?;
-                Ok(Some(QuestionAnswerOutcome {
-                    status: "answered".into(),
-                    acknowledgement: Some(LearningAcknowledgement {
-                        generation: receipt.generation,
-                        event_ids: receipt.event_ids,
-                        message_key: "question_confirmed".into(),
-                    }),
-                }))
-            }
-            QuestionAnswer::No => {
-                let event = membership_event(
-                    conn,
-                    &[representative],
-                    &support,
-                    LearningAction::QuestionNo,
-                    LearningOutcome::Negative,
-                    Some(question.target_identity.clone()),
-                    context,
-                    DecisionStage::Question,
-                )?;
-                let receipt = append_event_batch_in_transaction(conn, &[event])?;
-                finish_question_in_transaction(conn, question_id, QuestionStatus::Answered)?;
-                Ok(Some(QuestionAnswerOutcome {
-                    status: "answered".into(),
-                    acknowledgement: Some(LearningAcknowledgement {
-                        generation: receipt.generation,
-                        event_ids: receipt.event_ids,
-                        message_key: "question_corrected".into(),
-                    }),
-                }))
-            }
-        }
-    })?;
-    outcome.ok_or(Error::Conflict)
-}
-
-/// Pending identity questions for the gallery page, bounded and in priority
-/// order. Selection never mutates anything.
-pub fn pending_identity_questions(
-    conn: &Connection,
-    limit: usize,
-) -> Result<Vec<videre_core::face_learning::StoredQuestion>> {
-    Ok(list_pending_questions(conn, limit)?)
-}
-
-/// Refresh the pending question page from the active profile. Runs outside
-/// request handling; safe to call whenever training promotes a profile.
-pub fn refresh_identity_questions(
-    conn: &Connection,
-    config: &QuestionSelectionConfig,
-) -> Result<Vec<videre_core::face_learning::StoredQuestion>> {
-    videre_core::face_learning::ensure_question_tables(conn)?;
-    let candidates = select_questions(conn, config)?;
-    Ok(replace_pending_questions(conn, &candidates)?)
-}
-
-/// Learning state plus pending question volume for the status resource.
-pub fn face_learning_status(conn: &Connection) -> Result<FaceLearningStatus> {
-    videre_core::face_learning::ensure_learning_tables(conn)?;
-    videre_core::face_learning::ensure_question_tables(conn)?;
-    let state = videre_core::face_learning::learning_state(conn)?;
-    let pending_questions = conn.query_row(
-        "SELECT count(*) FROM face_learning_questions WHERE status = 'pending'",
-        [],
-        |row| row.get::<_, i64>(0),
-    )?;
-    // A retired profile was promoted and later replaced; it still counts as
-    // the run having promoted.
-    let last_candidate = match state.last_profile_id {
-        Some(id) => {
-            videre_core::face_learning::ensure_profile_table(conn)?;
-            conn.query_row(
-                "SELECT status FROM face_learning_profiles WHERE id = ?1",
-                [id],
-                |row| row.get::<_, String>(0),
-            )
-            .map(Some)
-            .or_else(|error| match error {
-                rusqlite::Error::QueryReturnedNoRows => Ok(None),
-                other => Err(other),
-            })?
-            .and_then(|status| match status.as_str() {
-                "active" | "retired" => Some("promoted".to_string()),
-                "rejected" => Some("rejected".to_string()),
-                _ => None,
-            })
-        }
-        None => None,
-    };
-    let waiting = state.status == videre_core::face_learning::LearningStatus::Waiting;
-    let failed = state.status == videre_core::face_learning::LearningStatus::Failed;
-    videre_core::face_learning::ensure_profile_table(conn)?;
-    // Only the id and stage: parsing the whole stored profile would make the
-    // status fail on a profile this build cannot read.
-    let active_profile = conn
-        .query_row(
-            "SELECT id, stage FROM face_learning_profiles WHERE status = 'active' LIMIT 1",
-            [],
-            |row| {
-                Ok(ActiveProfile {
-                    profile_id: row.get(0)?,
-                    stage: row.get(1)?,
-                })
-            },
-        )
-        .optional()?;
-    let feedback_needed = state.feedback_needed.filter(|_| waiting);
-    let summary = learning_summary(
-        conn,
-        active_profile.as_ref(),
-        feedback_needed.as_deref(),
-        failed,
-    )?;
-    Ok(FaceLearningStatus {
-        enabled: true,
-        generation: state.generation,
-        trained_generation: state.trained_generation,
-        status: format!("{:?}", state.status).to_lowercase(),
-        last_profile_id: state.last_profile_id,
-        last_candidate,
-        // Each reported only in the state it describes: a path that moves the
-        // state on without clearing a column never shows a stale message.
-        last_error: state.last_error.filter(|_| failed),
-        feedback_needed,
-        pending_questions: pending_questions as usize,
-        active_profile,
-        summary,
-    })
-}
-
-/// One sentence on what face learning contributes right now: the result the
-/// People toolbar shows instead of the training chatter.
-fn learning_summary(
-    conn: &Connection,
-    active: Option<&ActiveProfile>,
-    feedback_needed: Option<&str>,
-    failed: bool,
-) -> Result<String> {
-    if let Some(active) = active {
-        return Ok(format!(
-            "Learning: profile {} suggests names; grouping uses the settings above.",
-            active.profile_id
-        ));
-    }
-    if let Some(needed) = feedback_needed {
-        return Ok(format!("Learning: not used yet; {needed}."));
-    }
-    let rejected: i64 = conn.query_row(
-        "SELECT count(*) FROM face_learning_profiles WHERE status = 'rejected'",
-        [],
-        |row| row.get(0),
-    )?;
-    if rejected > 0 {
-        let latest: i64 = conn.query_row(
-            "SELECT max(id) FROM face_learning_profiles WHERE status = 'rejected'",
-            [],
-            |row| row.get(0),
-        )?;
-        let reason = rejection_reason(conn, latest)?
-            .map(|r| format!(" ({r})"))
-            .unwrap_or_default();
-        return Ok(format!(
-            "Learning: not used yet; {rejected} trained candidate(s) did not pass the quality checks{reason}. More confirmed names help."
-        ));
-    }
-    if failed {
-        return Ok(
-            "Learning: not used yet; the last training run failed and retries after new feedback."
-                .into(),
-        );
-    }
-    Ok("Learning: not used yet; naming people teaches it.".into())
-}
-
-/// Why profile `profile_id` was not promoted, from its first failing gate.
-pub fn rejection_reason(conn: &Connection, profile_id: i64) -> Result<Option<String>> {
-    let json: Option<String> = conn
-        .query_row(
-            "SELECT promotion_result_json FROM face_learning_profiles WHERE id = ?1",
-            [profile_id],
-            |row| row.get(0),
-        )
-        .optional()?
-        .flatten();
-    Ok(json
-        .and_then(|json| {
-            serde_json::from_str::<Vec<videre_core::face_learning::GateFailure>>(&json).ok()
-        })
-        .and_then(|failures| failures.first().map(describe_gate_failure)))
-}
-
-/// `suggestion_precision_wilson_lower_bound` 0.44 against 0.70, as a person
-/// would read it.
-fn describe_gate_failure(failure: &videre_core::face_learning::GateFailure) -> String {
-    let gate = failure.gate.replace('_', " ");
-    match (failure.observed, failure.required) {
-        (Some(observed), Some(required)) => {
-            format!("{gate} {observed:.2}, needs {required:.2}")
-        }
-        _ => gate,
-    }
-}
-
-/// One journal entry plus read-time proof facts. `source_available` says
-/// whether every referenced face still exists; `incompatible` says whether
-/// the entry can no longer feed training. Both are computed at read time and
-/// never rewrite the historical row.
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct FaceLearningEventProof {
-    #[serde(flatten)]
-    pub event: videre_core::face_learning::StoredLearningEvent,
-    pub source_available: bool,
-    pub incompatible: bool,
-}
-
-fn proof_for(
-    conn: &Connection,
-    event: videre_core::face_learning::StoredLearningEvent,
-    current_embedding_model_id: Option<&str>,
-) -> Result<FaceLearningEventProof> {
-    let mut source_available = true;
-    for face in &event.faces {
-        let exists: bool = conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM faces WHERE id = ?1)",
-            [face.face_id],
-            |row| row.get(0),
-        )?;
-        if !exists {
-            source_available = false;
-            break;
-        }
-    }
-    let incompatible = event.features.schema_version
-        != videre_core::face_learning::FEATURE_SCHEMA_VERSION
-        || current_embedding_model_id.is_some_and(|model| model != event.embedding_model_id);
-    Ok(FaceLearningEventProof {
-        event,
-        source_available,
-        incompatible,
-    })
-}
-
-/// Learning events, newest first. Payloads carry scalar feature snapshots and
-/// provenance ids only; embeddings never leave the library.
-pub fn face_learning_events(
-    conn: &Connection,
-    limit: usize,
-    before_id: Option<i64>,
-    current_embedding_model_id: Option<&str>,
-) -> Result<Vec<FaceLearningEventProof>> {
-    videre_core::face_learning::ensure_learning_tables(conn)?;
-    let limit = limit.clamp(1, 200);
-    let events = list_learning_events(conn, limit, before_id)?;
-    events
-        .into_iter()
-        .map(|event| proof_for(conn, event, current_embedding_model_id))
-        .collect()
-}
-
-pub fn face_learning_event(
-    conn: &Connection,
-    event_id: i64,
-    current_embedding_model_id: Option<&str>,
-) -> Result<Option<FaceLearningEventProof>> {
-    videre_core::face_learning::ensure_learning_tables(conn)?;
-    match videre_core::face_learning::learning_event(conn, event_id)? {
-        Some(event) => Ok(Some(proof_for(conn, event, current_embedding_model_id)?)),
-        None => Ok(None),
-    }
-}
-
-/// Load the immutable training inputs for the learning worker's snapshot.
-/// What training reads from the database. Loaded in one short read
-/// transaction; building the snapshot from it is slow and holds nothing.
-pub struct TrainingInputs {
-    pub labels: Vec<videre_core::face_learning::LabeledFace>,
-    pub observations: Vec<videre_core::face_learning::FaceObservation>,
-    pub events: Vec<videre_core::face_learning::StoredLearningEvent>,
-}
-
-/// Read the training inputs as one consistent state: a deferred read
-/// transaction, so a face deleted between two of the reads cannot fail the
-/// run.
-pub fn load_training_inputs(
-    conn: &Connection,
-    embedding_model_id: &str,
-) -> std::result::Result<TrainingInputs, videre_core::face_learning::LearningEventError> {
-    let tx = conn.unchecked_transaction()?;
-    let labels = videre_core::face_db::load_confirmed_face_labels(&tx)?;
-    let face_ids: Vec<i64> = {
-        let mut statement = tx.prepare("SELECT id FROM faces ORDER BY id")?;
-        let rows = statement
-            .query_map([], |row| row.get(0))?
-            .collect::<rusqlite::Result<Vec<i64>>>()?;
-        rows
-    };
-    let observations = videre_core::face_db::load_face_observations(&tx, &face_ids)?;
-    let events = videre_core::face_learning::eligible_events_for_training(
-        &tx,
-        embedding_model_id,
-        videre_core::face_learning::FEATURE_SCHEMA_VERSION,
-    )?;
-    tx.commit()?;
-    Ok(TrainingInputs {
-        labels,
-        observations,
-        events,
-    })
-}
-
-/// Build the training snapshot from loaded inputs. Pure and slow (the
-/// per-person features are quadratic in a person's face count), so it runs
-/// with no connection held.
-pub fn build_training_inputs(
-    inputs: &TrainingInputs,
-    generation: u64,
-    embedding_model_id: &str,
-    config: &videre_core::face_learning::TrainingConfig,
-) -> std::result::Result<videre_core::face_learning::TrainingSnapshot, String> {
-    videre_core::face_learning::build_training_snapshot(
-        generation,
-        embedding_model_id,
-        &inputs.labels,
-        &inputs.observations,
-        &inputs.events,
-        config,
-    )
-    .map_err(|e| e.to_string())
-}
-
-/// Persist a trained candidate: insert, promote through the shipped gates,
-/// and return the profile identity and verdict. The profile row keeps the
-/// promotion outcome either way.
-pub fn persist_trained_profile(
-    conn: &Connection,
-    embedding_model_id: &str,
-    run: &videre_core::face_learning::TrainingRun,
-    gates: &videre_core::face_learning::PromotionGates,
-    expected_generation: u64,
-) -> Result<TrainedProfileSummary> {
-    let expected_generation = i64::try_from(expected_generation).map_err(|_| Error::Invalid)?;
-    let validation = match run.comparison.selected {
-        videre_core::face_learning::CandidateKind::Logistic => &run.logistic_validation,
-        videre_core::face_learning::CandidateKind::Additive => &run.additive_validation,
-    };
-    let profile = videre_core::face_learning::NewProfile {
-        artifact_version: videre_core::face_learning::PROFILE_ARTIFACT_VERSION,
-        embedding_model_id: embedding_model_id.to_owned(),
-        feature_schema_version: videre_core::face_learning::FEATURE_SCHEMA_VERSION,
-        model_kind: run.selected.model_kind().to_owned(),
-        parameters: serde_json::to_vec(&run.selected).map_err(Error::from)?,
-        training_evidence: run.evidence_counts.clone(),
-        validation_report: validation.clone(),
-        stage: videre_core::face_learning::ProfileStage::Suggestion,
-    };
-    immediate_transaction(conn, || {
-        // Fence on the training marker, not the generation. Prune withdraws
-        // evidence by clearing it (the fit used evidence that is gone), while a
-        // teaching action only advances the generation and leaves it: that fit
-        // is still valid, and `mark_generation_trained` then leaves the state
-        // stale for a follow-up run. Discarding it would lose a whole run to
-        // every naming action made while it trained.
-        let (status, training_generation): (String, Option<i64>) = conn.query_row(
-            "SELECT status,training_generation FROM face_learning_state WHERE id=1",
-            [],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )?;
-        if status != "training" || training_generation != Some(expected_generation) {
-            return Err(Error::Conflict);
-        }
-        let profile_id = videre_core::face_learning::insert_candidate(conn, &profile)?;
-        let outcome = videre_core::face_learning::evaluate_and_promote_in_transaction(
-            conn, profile_id, gates,
-        )?;
-        Ok(TrainedProfileSummary {
-            profile_id,
-            model_kind: profile.model_kind,
-            promoted: outcome == videre_core::face_learning::PromotionOutcome::Promoted,
-        })
-    })
-}
-
-/// Mark one face as the person's primary (their labeling-page thumbnail),
-/// clearing any previous primary in the same transaction so exactly one
-/// remains. The target update is guarded by person_label so it can't steal a
-/// face from another person.
 pub fn set_primary(conn: &Connection, face_id: i64, person_label: &str) -> Result<()> {
     let person_label =
         videre_core::person::normalize(person_label).unwrap_or_else(|| person_label.to_string());
@@ -1510,81 +626,6 @@ pub fn set_primary(conn: &Connection, face_id: i64, person_label: &str) -> Resul
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn stale_generation_cannot_insert_or_promote_a_profile() {
-        use videre_core::face_learning::{
-            CalibrationModel, CandidateComparison, CandidateKind, LogisticModel, LogisticScorer,
-            ModelBundle, TrainingEvidenceCounts, TrainingRun, ValidationReport,
-        };
-        let conn = seed();
-        conn.execute(
-            "UPDATE face_learning_state SET generation=1, status='training', training_generation=1",
-            [],
-        )
-        .unwrap();
-        conn.execute(
-            "UPDATE face_learning_state SET generation=2, status='stale', training_generation=NULL",
-            [],
-        )
-        .unwrap();
-        let scorer = LogisticScorer {
-            model: LogisticModel {
-                feature_names: vec!["x".into()],
-                means: vec![0.0],
-                scales: vec![1.0],
-                intercept: 0.0,
-                weights: vec![0.0],
-                l2: 1.0,
-                positive_class_weight: 1.0,
-            },
-            calibration: CalibrationModel {
-                intercept: 0.0,
-                slope: 1.0,
-            },
-            threshold: 0.5,
-        };
-        let report = ValidationReport {
-            protocol_version: 1,
-            evidence_schema_version: 1,
-            feature_schema_version: 1,
-            datasets: Vec::new(),
-        };
-        let run = TrainingRun {
-            selected: ModelBundle::Logistic {
-                artifact_version: 1,
-                embedding_model_id: "test".into(),
-                feature_schema_version: 1,
-                membership: scorer.clone(),
-                cluster_quality: scorer,
-            },
-            logistic_validation: report.clone(),
-            additive_validation: report,
-            comparison: CandidateComparison {
-                selected: CandidateKind::Logistic,
-                logistic_passes: false,
-                additive_passes: false,
-                additive_gain: 0.0,
-                folds_agree: true,
-                additive_regressions: Vec::new(),
-            },
-            evidence_counts: TrainingEvidenceCounts {
-                positive_pairs: 0,
-                negative_pairs: 0,
-                explicit_negative_pairs: 0,
-            },
-        };
-        assert!(matches!(
-            persist_trained_profile(&conn, "test", &run, &Default::default(), 1),
-            Err(Error::Conflict)
-        ));
-        assert_eq!(
-            conn.query_row("SELECT count(*) FROM face_learning_profiles", [], |r| r
-                .get::<_, i64>(0))
-                .unwrap(),
-            0
-        );
-    }
 
     #[test]
     fn assign_detaches_the_face_from_its_cluster() {
@@ -1659,25 +700,25 @@ mod tests {
         conn
     }
 
-    mod learning {
+    /// The gallery's naming rules: what a request may name, take off or
+    /// ungroup, so a click on a stale page cannot write a state the page
+    /// never showed.
+    mod gallery_rules {
         use super::*;
-        use videre_core::face_learning::{
-            learning_state, list_learning_events, LearningAction, LearningDecisionKind,
-            LearningOutcome,
-        };
 
-        fn context() -> TeachingContext {
-            TeachingContext {
-                embedding_model_id: "buffalo_l/w600k_r50.onnx".to_owned(),
-                active_profile_id: None,
-                record: true,
-            }
+        fn label_of(conn: &Connection, id: i64) -> (Option<String>, i64, Option<i64>) {
+            conn.query_row(
+                "SELECT person_label, confirmed, cluster_id FROM faces WHERE id = ?1",
+                [id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap()
         }
 
         #[test]
         fn a_repeated_face_is_rejected_with_a_reason() {
             let conn = seed();
-            let err = new_person_with_learning(&conn, &[3, 3, 4], "Bob", &context()).unwrap_err();
+            let err = new_person(&conn, &[3, 3, 4], "Bülent").unwrap_err();
             assert_eq!(err.to_string(), "the request lists face 3 more than once");
         }
 
@@ -1689,7 +730,7 @@ mod tests {
                 [],
             )
             .unwrap();
-            let err = new_person_with_learning(&conn, &[3, 4], "Bob", &context()).unwrap_err();
+            let err = new_person(&conn, &[3, 4], "Bülent").unwrap_err();
             assert_eq!(
                 err.to_string(),
                 "the request lists 2 face(s), cluster 7 has 3 unassigned face(s)"
@@ -1699,580 +740,82 @@ mod tests {
         #[test]
         fn a_named_face_is_rejected_with_a_reason() {
             let conn = seed();
-            let err = new_person_with_learning(&conn, &[1], "Bob", &context()).unwrap_err();
+            let err = new_person(&conn, &[1], "Bülent").unwrap_err();
             assert_eq!(err.to_string(), "face 1 is already named or confirmed");
         }
 
-        fn embedding(x: u16, y: u16) -> Vec<u8> {
-            [x.to_le_bytes(), y.to_le_bytes()].concat()
-        }
-
-        fn learning_seed() -> Connection {
-            let conn = Connection::open_in_memory().unwrap();
-            videre_core::face_db::create_faces_table(&conn).unwrap();
-            conn.execute_batch(
-                "CREATE TABLE file_hashes (hash TEXT PRIMARY KEY, path TEXT);
-                 INSERT INTO people (name, full_name) VALUES ('alice', 'Alice');",
-            )
-            .unwrap();
-            let rows = [
-                (1, "a1", embedding(0x3c00, 0), None, Some("alice"), 1),
-                (2, "a2", embedding(0x3b9a, 0x3266), None, Some("alice"), 1),
-                (3, "c1", embedding(0x3c00, 0), Some(7), None, 0),
-                (4, "c2", embedding(0x3b9a, 0x3266), Some(7), None, 0),
-                (5, "c3", embedding(0x3b33, 0x34cd), Some(7), None, 0),
-                (6, "s1", embedding(0x3266, 0x3b9a), None, None, 0),
-                (7, "d1", embedding(0x3c00, 0), Some(9), None, 0),
-                (8, "d2", embedding(0, 0x3c00), Some(9), None, 0),
-            ];
-            for (id, hash, bytes, cluster, label, confirmed) in rows {
-                conn.execute(
-                    "INSERT INTO file_hashes (hash, path) VALUES (?1, ?2)",
-                    rusqlite::params![hash, format!("/p/{hash}.jpg")],
-                )
-                .unwrap();
-                conn.execute(
-                    "INSERT INTO faces
-                     (id, hash, bbox, embedding, cluster_id, person_label, confirmed,
-                      is_primary, det_score, blur)
-                     VALUES (?1, ?2, '0,0,112,112', ?3, ?4, ?5, ?6, 0, 0.95, 900.0)",
-                    rusqlite::params![id, hash, bytes, cluster, label, confirmed],
-                )
-                .unwrap();
-            }
-            conn
-        }
-
-        fn off() -> TeachingContext {
-            TeachingContext {
-                record: false,
-                ..context()
-            }
-        }
-
-        fn face_rows(conn: &Connection) -> Vec<(i64, Option<i64>, Option<String>, bool)> {
-            let mut statement = conn
-                .prepare("SELECT id, cluster_id, person_label, confirmed FROM faces ORDER BY id")
-                .unwrap();
-            let rows = statement
-                .query_map([], |row| {
-                    Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
-                })
-                .unwrap()
-                .collect::<rusqlite::Result<Vec<_>>>()
-                .unwrap();
-            rows
-        }
-
-        fn event_count(conn: &Connection) -> i64 {
-            conn.query_row("SELECT count(*) FROM face_learning_events", [], |row| {
-                row.get(0)
-            })
-            .unwrap_or(0)
-        }
-
-        /// Learning off: every mutation writes the same faces as with learning
-        /// on, records no event, and leaves the generation alone.
         #[test]
-        fn with_learning_off_mutations_write_the_same_faces_and_record_nothing() {
-            type Step = fn(&Connection, &TeachingContext) -> Result<LearningAcknowledgement>;
-            let steps: [(&str, Step); 4] = [
-                ("assign", |c, x| assign_with_learning(c, &[6], "alice", x)),
-                ("new person", |c, x| {
-                    new_person_with_learning(c, &[3, 4, 5], "Bob", x)
-                }),
-                ("remove face", |c, x| remove_face_with_learning(c, 7, x)),
-                ("dissolve", |c, x| dissolve_cluster_with_learning(c, 9, x)),
-            ];
-            for (name, step) in steps {
-                let on = learning_seed();
-                let off_conn = learning_seed();
-                step(&on, &context()).unwrap();
-                let ack = step(&off_conn, &off()).unwrap();
-                assert_eq!(face_rows(&on), face_rows(&off_conn), "{name}");
-                assert_eq!(ack.event_ids, Vec::<i64>::new(), "{name}");
-                assert_eq!(ack.message_key, "learning_off", "{name}");
-                assert_eq!(ack.generation, 0, "{name}");
-                assert_eq!(event_count(&off_conn), 0, "{name}");
-                assert_eq!(learning_state(&off_conn).unwrap().generation, 0, "{name}");
-            }
-        }
-
-        #[test]
-        fn with_learning_off_the_same_requests_are_rejected() {
-            let conn = learning_seed();
-            for (on, off) in [
-                (
-                    new_person_with_learning(&conn, &[1], "Bob", &context()),
-                    new_person_with_learning(&conn, &[1], "Bob", &off()),
-                ),
-                (
-                    new_person_with_learning(&conn, &[3, 4], "Bob", &context()),
-                    new_person_with_learning(&conn, &[3, 4], "Bob", &off()),
-                ),
-                (
-                    assign_with_learning(&conn, &[6], "nobody", &context()),
-                    assign_with_learning(&conn, &[6], "nobody", &off()),
-                ),
-                (
-                    remove_face_with_learning(&conn, 6, &context()),
-                    remove_face_with_learning(&conn, 6, &off()),
-                ),
-                (
-                    dissolve_cluster_with_learning(&conn, 42, &context()),
-                    dissolve_cluster_with_learning(&conn, 42, &off()),
-                ),
-            ] {
-                assert_eq!(on.unwrap_err().to_string(), off.unwrap_err().to_string());
-            }
-            assert_eq!(event_count(&conn), 0);
-        }
-
-        #[test]
-        fn learning_assignments_emit_expected_positive_evidence_once_per_action() {
-            let conn = learning_seed();
-
-            let assigned = assign_with_learning(&conn, &[6], "alice", &context()).unwrap();
-            assert_eq!(assigned.generation, 1);
-            assert_eq!(assigned.event_ids.len(), 1);
-
-            let labeled = new_person_with_learning(&conn, &[3, 4, 5], "Bob", &context()).unwrap();
-            assert_eq!(labeled.generation, 2);
-            assert_eq!(labeled.event_ids.len(), 4);
-
-            let events = list_learning_events(&conn, 20, None).unwrap();
-            assert_eq!(events.len(), 5);
+        fn one_face_of_a_cluster_is_rejected() {
+            let conn = seed();
+            let err = assign_to_person(&conn, &[3], "alice").unwrap_err();
             assert_eq!(
-                events
-                    .iter()
-                    .filter(|event| event.action == LearningAction::LabelCluster
-                        && event.decision_kind == LearningDecisionKind::ClusterQuality
-                        && event.outcome == LearningOutcome::Positive)
-                    .count(),
-                1
-            );
-            assert_eq!(
-                events
-                    .iter()
-                    .filter(
-                        |event| event.decision_kind == LearningDecisionKind::Membership
-                            && event.outcome == LearningOutcome::Positive
-                    )
-                    .count(),
-                4
-            );
-            assert!(events.iter().all(|event| {
-                let json = event.features.to_canonical_json().unwrap();
-                !json.contains("alice") && !json.contains("bob") && !json.contains("/p/")
-            }));
-
-            let conn = learning_seed();
-            let assigned_cluster =
-                assign_with_learning(&conn, &[3, 4, 5], "alice", &context()).unwrap();
-            assert_eq!(assigned_cluster.generation, 1);
-            assert_eq!(assigned_cluster.event_ids.len(), 4);
-            let events = list_learning_events(&conn, 20, None).unwrap();
-            assert_eq!(
-                events
-                    .iter()
-                    .filter(|event| event.action == LearningAction::AssignCluster
-                        && event.decision_kind == LearningDecisionKind::Membership)
-                    .count(),
-                3
-            );
-            assert_eq!(
-                events
-                    .iter()
-                    .filter(|event| event.action == LearningAction::AssignCluster
-                        && event.decision_kind == LearningDecisionKind::ClusterQuality)
-                    .count(),
-                1
+                err.to_string(),
+                "face 3 belongs to cluster 7; assign the cluster or remove the face from it first"
             );
         }
 
         #[test]
-        fn a_large_cluster_has_a_deterministic_per_action_membership_cap() {
-            let conn = learning_seed();
-            for id in 10..22 {
-                let hash = format!("large-{id}");
-                conn.execute(
-                    "INSERT INTO faces
-                     (id, hash, bbox, embedding, cluster_id, confirmed, is_primary,
-                      det_score, blur)
-                     VALUES (?1, ?2, '0,0,112,112', ?3, 42, 0, 0, 0.95, 900.0)",
-                    rusqlite::params![id, hash, embedding(0x3c00, (id as u16) + 0x2000)],
-                )
-                .unwrap();
-            }
-            let ids: Vec<_> = (10..22).collect();
-            let acknowledgement =
-                new_person_with_learning(&conn, &ids, "Large Family", &context()).unwrap();
-            assert_eq!(
-                acknowledgement.event_ids.len(),
-                1 + MAX_MEMBERSHIP_EVENTS_PER_ACTION
-            );
-            assert_eq!(learning_state(&conn).unwrap().generation, 1);
-
-            let events = list_learning_events(&conn, 20, None).unwrap();
-            assert_eq!(
-                events
-                    .iter()
-                    .filter(|event| event.decision_kind == LearningDecisionKind::Membership)
-                    .count(),
-                MAX_MEMBERSHIP_EVENTS_PER_ACTION
-            );
-            assert!(events
-                .iter()
-                .filter(|event| event.decision_kind == LearningDecisionKind::Membership)
-                .all(|event| event.support_count as usize <= MAX_SUPPORT_FACES));
+        fn assigning_to_someone_who_does_not_exist_is_not_found() {
+            let conn = seed();
+            assert!(matches!(
+                assign_to_person(&conn, &[5], "Şükrü"),
+                Err(Error::NotFound)
+            ));
+            assert_eq!(label_of(&conn, 5), (None, 0, None));
         }
 
         #[test]
-        fn learning_corrections_use_pre_action_state_without_pairwise_dissolve_labels() {
-            let conn = learning_seed();
-
-            let removed_cluster = remove_face_with_learning(&conn, 3, &context()).unwrap();
-            assert_eq!(removed_cluster.generation, 1);
-            let removed_person = remove_face_with_learning(&conn, 2, &context()).unwrap();
-            assert_eq!(removed_person.generation, 2);
-            let dissolved = dissolve_cluster_with_learning(&conn, 9, &context()).unwrap();
-            assert_eq!(dissolved.generation, 3);
-
-            let events = list_learning_events(&conn, 20, None).unwrap();
-            assert_eq!(events.len(), 3);
-            assert_eq!(
-                events
-                    .iter()
-                    .filter(
-                        |event| event.decision_kind == LearningDecisionKind::Membership
-                            && event.outcome == LearningOutcome::Negative
-                    )
-                    .count(),
-                2
-            );
-            let dissolve = events
-                .iter()
-                .find(|event| event.action == LearningAction::DissolveCluster)
-                .unwrap();
-            assert_eq!(dissolve.decision_kind, LearningDecisionKind::ClusterQuality);
-            assert_eq!(dissolve.outcome, LearningOutcome::Negative);
-            assert_eq!(dissolve.faces.len(), 2);
-        }
-
-        #[test]
-        fn unsupported_last_face_removals_still_apply_without_fabricated_evidence() {
-            let conn = learning_seed();
-            remove_face_with_learning(&conn, 1, &context()).unwrap();
-            let last_person_face = remove_face_with_learning(&conn, 2, &context()).unwrap();
-            assert!(last_person_face.event_ids.is_empty());
-            assert_eq!(last_person_face.generation, 1);
-            let person_state: (Option<String>, i64) = conn
+        fn a_single_joins_an_existing_person_and_a_new_name_creates_one() {
+            let conn = seed();
+            assign_to_person(&conn, &[5], "Alice").unwrap();
+            assert_eq!(label_of(&conn, 5), (Some("alice".into()), 1, None));
+            new_person(&conn, &[3, 4], "Gökçe Yıldız").unwrap();
+            assert_eq!(label_of(&conn, 3), (Some("gokce_yildiz".into()), 1, None));
+            let full: String = conn
                 .query_row(
-                    "SELECT person_label, confirmed FROM faces WHERE id = 2",
+                    "SELECT full_name FROM people WHERE name = 'gokce_yildiz'",
                     [],
-                    |row| Ok((row.get(0)?, row.get(1)?)),
+                    |r| r.get(0),
                 )
                 .unwrap();
-            assert_eq!(person_state, (None, 0));
+            assert_eq!(full, "Gökçe Yıldız");
+        }
 
-            remove_face_with_learning(&conn, 3, &context()).unwrap();
-            remove_face_with_learning(&conn, 4, &context()).unwrap();
-            let last_cluster_face = remove_face_with_learning(&conn, 5, &context()).unwrap();
-            assert!(last_cluster_face.event_ids.is_empty());
-            assert_eq!(last_cluster_face.generation, 3);
-            let cluster_id: Option<i64> = conn
-                .query_row("SELECT cluster_id FROM faces WHERE id = 5", [], |row| {
-                    row.get(0)
-                })
+        #[test]
+        fn a_new_person_with_an_existing_name_joins_them() {
+            let conn = seed();
+            new_person(&conn, &[3, 4], "ALICE").unwrap();
+            assert_eq!(label_of(&conn, 3), (Some("alice".into()), 1, None));
+        }
+
+        #[test]
+        fn only_a_named_or_a_clustered_face_can_be_taken_off() {
+            let conn = seed();
+            assert!(matches!(remove_face(&conn, 5), Err(Error::Invalid)));
+            remove_face(&conn, 2).unwrap();
+            assert_eq!(label_of(&conn, 2), (None, 0, None));
+            remove_face(&conn, 3).unwrap();
+            assert_eq!(label_of(&conn, 3), (None, 0, None));
+        }
+
+        #[test]
+        fn only_a_whole_unassigned_cluster_of_two_or_more_dissolves() {
+            let conn = seed();
+            assert!(matches!(dissolve_cluster(&conn, 42), Err(Error::NotFound)));
+            conn.execute("UPDATE faces SET cluster_id = 8 WHERE id = 5", [])
                 .unwrap();
-            assert_eq!(cluster_id, None);
-        }
-
-        /// The waiting ask says "from a group of two or more faces" because
-        /// that is what trains again: a person named from one face records
-        /// nothing and leaves the state where it was.
-        #[test]
-        fn following_the_waiting_ask_starts_a_new_run_and_one_face_does_not() {
-            let conn = learning_seed();
-            assign_with_learning(&conn, &[7, 8], "alice", &context()).unwrap();
-            videre_core::face_learning::mark_training_started(&conn).unwrap();
-            let ask = videre_core::face_learning::TrainingError::OneSidedFold {
-                decision_kind: videre_core::face_learning::LearningDecisionKind::Membership,
-                lacking_negatives: true,
-            }
-            .feedback_needed(&videre_core::face_learning::TrainingConfig::default())
-            .unwrap();
-            assert_eq!(ask, "name 1 more person from a group of two or more faces");
-            videre_core::face_learning::mark_training_waiting(&conn, 1, &ask).unwrap();
-
-            let single = new_person_with_learning(&conn, &[6], "Çağla", &context()).unwrap();
-            assert!(single.event_ids.is_empty());
-            let status = face_learning_status(&conn).unwrap();
-            assert_eq!(
-                (status.generation, status.status.as_str()),
-                (1, "waiting"),
-                "one face records nothing, so nothing new is trained"
-            );
-            assert_eq!(status.feedback_needed.as_deref(), Some(ask.as_str()));
-
-            let group = new_person_with_learning(&conn, &[3, 4, 5], "Özgür", &context()).unwrap();
-            assert!(!group.event_ids.is_empty());
-            let status = face_learning_status(&conn).unwrap();
-            assert_eq!(
-                (status.generation, status.status.as_str()),
-                (2, "stale"),
-                "a named group is new evidence, so the worker trains again"
-            );
-            assert_eq!(status.feedback_needed, None);
-            assert_eq!(
-                status.last_error, None,
-                "the ask stored for the waiting run never reads as an error"
-            );
-        }
-
-        /// The ask shares the column a failure's error uses. A path that marks
-        /// the state stale without clearing it (the foreign-key repair) must
-        /// not turn the ask into a reported error.
-        #[test]
-        fn a_stale_state_never_reports_the_waiting_ask_as_an_error() {
-            let conn = learning_seed();
-            assign_with_learning(&conn, &[7, 8], "alice", &context()).unwrap();
-            videre_core::face_learning::mark_training_started(&conn).unwrap();
-            videre_core::face_learning::mark_training_waiting(
-                &conn,
-                1,
-                "dissolve 2 more wrong clusters",
-            )
-            .unwrap();
+            assert!(matches!(dissolve_cluster(&conn, 8), Err(Error::Invalid)));
             conn.execute(
-                "UPDATE face_learning_state SET generation = generation + 1, status = 'stale'",
+                "INSERT INTO faces (id,hash,bbox,embedding,cluster_id,person_label,confirmed)
+                 VALUES (6,'h5','1,1,9,9',X'0000',7,'alice',1)",
                 [],
             )
             .unwrap();
-            let status = face_learning_status(&conn).unwrap();
-            assert_eq!(status.status, "stale");
-            assert_eq!(status.last_error, None);
-            assert_eq!(status.feedback_needed, None);
-        }
-
-        fn insert_profile(conn: &Connection, stage: &str, status: &str, gates: &str) {
-            videre_core::face_learning::ensure_profile_table(conn).unwrap();
-            conn.execute(
-                "INSERT INTO face_learning_profiles (
-                     artifact_version, embedding_model_id, feature_schema_version, model_kind,
-                     parameters, training_evidence_json, validation_report_json, stage, status,
-                     promotion_result_json, created_at
-                 ) VALUES (1, 'm', 1, 'logistic', X'00', '{}', '{}', ?1, ?2, ?3, 'now')",
-                rusqlite::params![stage, status, gates],
-            )
-            .unwrap();
-        }
-
-        #[test]
-        fn the_summary_says_learning_is_not_used_before_any_profile() {
-            let conn = learning_seed();
-            let status = face_learning_status(&conn).unwrap();
-            assert_eq!(status.active_profile, None);
-            assert_eq!(
-                status.summary,
-                "Learning: not used yet; naming people teaches it."
-            );
-        }
-
-        #[test]
-        fn the_summary_names_rejected_candidates_and_the_gate_they_missed() {
-            let conn = learning_seed();
-            let gates = r#"[{"dataset_key":"cluster_quality-fold-2","gate":"suggestion_precision","observed":0.8333,"required":0.85}]"#;
-            insert_profile(&conn, "suggestion", "rejected", gates);
-            insert_profile(&conn, "suggestion", "rejected", gates);
-            let status = face_learning_status(&conn).unwrap();
-            assert_eq!(
-                status.summary,
-                "Learning: not used yet; 2 trained candidate(s) did not pass the quality checks \
-                 (suggestion precision 0.83, needs 0.85). More confirmed names help."
-            );
-        }
-
-        #[test]
-        fn the_summary_names_the_active_profile() {
-            let conn = learning_seed();
-            insert_profile(&conn, "suggestion", "active", "[]");
-            let status = face_learning_status(&conn).unwrap();
-            let active = status.active_profile.expect("an active profile");
-            assert_eq!(active.stage, "suggestion");
-            assert_eq!(
-                status.summary,
-                format!(
-                    "Learning: profile {} suggests names; grouping uses the settings above.",
-                    active.profile_id
-                )
-            );
-        }
-
-        #[test]
-        fn new_person_collision_uses_existing_person_support() {
-            let conn = learning_seed();
-            let acknowledgement =
-                new_person_with_learning(&conn, &[6], "Alice", &context()).unwrap();
-            assert_eq!(acknowledgement.generation, 1);
-            assert_eq!(acknowledgement.event_ids.len(), 1);
-            let events = list_learning_events(&conn, 10, None).unwrap();
-            assert_eq!(events[0].action, LearningAction::AssignFace);
-            assert_eq!(events[0].target_identity.as_deref(), Some("alice"));
-            assert_eq!(events[0].support_count, 2);
-        }
-
-        #[test]
-        fn assigning_to_a_face_less_person_keeps_only_supported_evidence() {
-            let conn = learning_seed();
-            conn.execute(
-                "UPDATE faces
-                 SET person_label = NULL, confirmed = 0
-                 WHERE person_label = 'alice'",
-                [],
-            )
-            .unwrap();
-
-            let singleton = assign_with_learning(&conn, &[6], "Alice", &context()).unwrap();
-            assert!(singleton.event_ids.is_empty());
-            assert_eq!(singleton.generation, 0);
-            assert_eq!(singleton.message_key, "face_named_without_comparison");
-            let assigned: (Option<String>, i64) = conn
-                .query_row(
-                    "SELECT person_label, confirmed FROM faces WHERE id = 6",
-                    [],
-                    |row| Ok((row.get(0)?, row.get(1)?)),
-                )
-                .unwrap();
-            assert_eq!(assigned, (Some("alice".to_owned()), 1));
-            assert!(list_learning_events(&conn, 10, None).unwrap().is_empty());
-
-            let conn = learning_seed();
-            conn.execute(
-                "UPDATE faces
-                 SET person_label = NULL, confirmed = 0
-                 WHERE person_label = 'alice'",
-                [],
-            )
-            .unwrap();
-            let cluster = new_person_with_learning(&conn, &[3, 4, 5], "Alice", &context()).unwrap();
-            assert_eq!(cluster.event_ids.len(), 1);
-            assert_eq!(cluster.generation, 1);
-            let events = list_learning_events(&conn, 10, None).unwrap();
-            assert_eq!(events.len(), 1);
-            assert_eq!(events[0].action, LearningAction::AssignCluster);
-            assert_eq!(
-                events[0].decision_kind,
-                LearningDecisionKind::ClusterQuality
-            );
-        }
-
-        #[test]
-        fn event_insert_failure_rolls_back_the_visible_assignment_and_generation() {
-            let conn = learning_seed();
-            conn.execute_batch(
-                "CREATE TRIGGER reject_learning_event
-                 BEFORE INSERT ON face_learning_events
-                 BEGIN SELECT RAISE(ABORT, 'test rejection'); END;",
-            )
-            .unwrap();
-
-            assert!(assign_with_learning(&conn, &[6], "alice", &context()).is_err());
-            let state: (Option<String>, i64) = conn
-                .query_row(
-                    "SELECT person_label, confirmed FROM faces WHERE id = 6",
-                    [],
-                    |row| Ok((row.get(0)?, row.get(1)?)),
-                )
-                .unwrap();
-            assert_eq!(state, (None, 0));
-            assert_eq!(learning_state(&conn).unwrap().generation, 0);
-            assert!(list_learning_events(&conn, 20, None).unwrap().is_empty());
-        }
-
-        #[test]
-        fn commit_failure_rolls_back_faces_events_and_generation() {
-            let conn = learning_seed();
-            conn.execute_batch(
-                "PRAGMA foreign_keys = ON;
-                 CREATE TABLE commit_guard_parent (id INTEGER PRIMARY KEY);
-                 CREATE TABLE commit_guard_child (
-                     event_id INTEGER PRIMARY KEY,
-                     parent_id INTEGER NOT NULL,
-                     FOREIGN KEY(parent_id) REFERENCES commit_guard_parent(id)
-                         DEFERRABLE INITIALLY DEFERRED
-                 );
-                 CREATE TRIGGER fail_learning_commit
-                 AFTER INSERT ON face_learning_events
-                 BEGIN
-                     INSERT INTO commit_guard_child (event_id, parent_id)
-                     VALUES (NEW.id, 999);
-                 END;",
-            )
-            .unwrap();
-
-            assert!(assign_with_learning(&conn, &[6], "alice", &context()).is_err());
-            let state: (Option<String>, i64) = conn
-                .query_row(
-                    "SELECT person_label, confirmed FROM faces WHERE id = 6",
-                    [],
-                    |row| Ok((row.get(0)?, row.get(1)?)),
-                )
-                .unwrap();
-            assert_eq!(state, (None, 0));
-            assert_eq!(learning_state(&conn).unwrap().generation, 0);
-            assert!(list_learning_events(&conn, 20, None).unwrap().is_empty());
-        }
-
-        #[test]
-        fn malformed_or_mixed_prestate_rolls_back_without_learning() {
-            let conn = learning_seed();
-            conn.execute("UPDATE faces SET embedding = X'0000' WHERE id = 6", [])
-                .unwrap();
-            assert!(assign_with_learning(&conn, &[6], "alice", &context()).is_err());
-            assert!(new_person_with_learning(&conn, &[3, 7], "Bob", &context()).is_err());
-            assert!(new_person_with_learning(&conn, &[1], "Bob", &context()).is_err());
-            assert!(assign_with_learning(&conn, &[999], "alice", &context()).is_err());
-            assert_eq!(learning_state(&conn).unwrap().generation, 0);
-            assert!(list_learning_events(&conn, 20, None).unwrap().is_empty());
-        }
-
-        #[test]
-        fn deleting_a_person_invalidates_identity_evidence_without_a_negative_event() {
-            let conn = learning_seed();
-            assign_with_learning(&conn, &[6], "alice", &context()).unwrap();
-            let acknowledgement = delete_person_with_learning(&conn, "alice")
-                .unwrap()
-                .unwrap();
-            assert_eq!(acknowledgement.generation, 2);
-            assert!(acknowledgement.event_ids.is_empty());
-
-            let events = list_learning_events(&conn, 20, None).unwrap();
-            assert_eq!(events.len(), 1);
-            assert!(!events[0].eligible);
-            assert_eq!(
-                events[0].invalidation_reason,
-                Some(videre_core::face_learning::InvalidationReason::PersonRemoved)
-            );
-            assert!(delete_person_with_learning(&conn, "alice")
-                .unwrap()
-                .is_none());
-            assert_eq!(learning_state(&conn).unwrap().generation, 2);
-        }
-
-        #[test]
-        fn deleting_a_person_without_learning_evidence_keeps_generation_current() {
-            let conn = learning_seed();
-            assert_eq!(learning_state(&conn).unwrap().generation, 0);
-
-            let acknowledgement = delete_person_with_learning(&conn, "alice")
-                .unwrap()
-                .unwrap();
-
-            assert_eq!(acknowledgement.generation, 0);
-            assert!(acknowledgement.event_ids.is_empty());
-            assert_eq!(learning_state(&conn).unwrap().generation, 0);
-            assert!(list_learning_events(&conn, 10, None).unwrap().is_empty());
+            assert!(matches!(dissolve_cluster(&conn, 7), Err(Error::Invalid)));
+            conn.execute("DELETE FROM faces WHERE id = 6", []).unwrap();
+            dissolve_cluster(&conn, 7).unwrap();
+            assert_eq!(label_of(&conn, 3), (None, 0, None));
+            assert_eq!(label_of(&conn, 4), (None, 0, None));
         }
     }
 
@@ -2981,545 +1524,11 @@ mod never_run_tests {
         assert!(data.singletons.is_empty());
     }
 
-    // ---- questions ----
-
-    mod question_fixture {
-        use super::*;
-        use videre_core::face_learning::{
-            ensure_question_tables, replace_pending_questions, select_questions, LogisticModel,
-            LogisticScorer, ModelBundle, QuestionSelectionConfig, MEMBERSHIP_FEATURE_NAMES,
-            MODEL_ARTIFACT_VERSION,
-        };
-
-        pub fn embedding_blob(x: f32, y: f32) -> Vec<u8> {
-            let mut bytes = Vec::with_capacity(4);
-            bytes.extend_from_slice(&half::f16::from_f32(x).to_le_bytes());
-            bytes.extend_from_slice(&half::f16::from_f32(y).to_le_bytes());
-            bytes
-        }
-
-        fn logistic_bundle() -> ModelBundle {
-            let names: Vec<String> = MEMBERSHIP_FEATURE_NAMES
-                .iter()
-                .map(|name| name.to_string())
-                .collect();
-            let means: Vec<f64> = names
-                .iter()
-                .map(|name| if name == "similarity_mean" { 1.0 } else { 0.0 })
-                .collect();
-            let scales: Vec<f64> = names
-                .iter()
-                .map(|name| if name == "similarity_mean" { 0.5 } else { 1.0 })
-                .collect();
-            let weights: Vec<f64> = names
-                .iter()
-                .map(|name| if name == "similarity_mean" { 2.0 } else { 0.0 })
-                .collect();
-            let scorer = LogisticScorer {
-                model: LogisticModel {
-                    feature_names: names,
-                    means,
-                    scales,
-                    intercept: 0.0,
-                    weights,
-                    l2: 1.0,
-                    positive_class_weight: 1.0,
-                },
-                calibration: videre_core::face_learning::CalibrationModel {
-                    intercept: 0.0,
-                    slope: 1.0,
-                },
-                threshold: 0.5,
-            };
-            ModelBundle::Logistic {
-                artifact_version: MODEL_ARTIFACT_VERSION,
-                embedding_model_id: "arcface/test".into(),
-                feature_schema_version: 1,
-                membership: scorer.clone(),
-                cluster_quality: scorer,
-            }
-        }
-
-        /// Faces 10 and 11 sit in cluster 1; faces 12 and 13 confirm "alice".
-        /// Returns the connection and the pending question id asking about
-        /// cluster 1 and alice.
-        /// Mirrors the planned foreign-key contract: enforcement on, and a face
-        /// label must name an existing person.
-        pub fn library() -> (Connection, i64, i64) {
-            let conn = Connection::open_in_memory().unwrap();
-            conn.execute_batch(
-                "PRAGMA foreign_keys = ON;
-                 CREATE TABLE people (name TEXT PRIMARY KEY, full_name TEXT NOT NULL);
-                 CREATE TABLE faces (id INTEGER PRIMARY KEY, hash TEXT NOT NULL,
-                 bbox TEXT NOT NULL, landmark TEXT, embedding BLOB NOT NULL,
-                 cluster_id INTEGER,
-                 person_label TEXT REFERENCES people(name) ON DELETE RESTRICT ON UPDATE RESTRICT,
-                 confirmed INTEGER DEFAULT 0,
-                 is_primary INTEGER DEFAULT 0, det_score REAL, blur REAL, oriented INTEGER);",
-            )
-            .unwrap();
-            videre_core::face_learning::ensure_learning_tables(&conn).unwrap();
-            videre_core::face_learning::ensure_profile_table(&conn).unwrap();
-            ensure_question_tables(&conn).unwrap();
-
-            for (id, cluster) in [(10, Some(1)), (11, Some(1)), (12, None), (13, None)] {
-                conn.execute(
-                    "INSERT INTO faces (id, hash, bbox, embedding, cluster_id, confirmed, det_score, blur)
-                     VALUES (?1, 'h' || ?1, '0,0,80,80', ?2, ?3, 0, 0.9, 600.0)",
-                    rusqlite::params![id, embedding_blob(1.0, 0.0), cluster],
-                )
-                .unwrap();
-            }
-            assign(&conn, &[12, 13], "Alice").unwrap();
-
-            let evidence =
-                serde_json::to_string(&videre_core::face_learning::TrainingEvidenceCounts {
-                    positive_pairs: 20,
-                    negative_pairs: 20,
-                    explicit_negative_pairs: 0,
-                })
-                .unwrap();
-            let report = serde_json::to_string(&videre_core::face_learning::ValidationReport {
-                protocol_version: 1,
-                evidence_schema_version: 1,
-                feature_schema_version: 1,
-                datasets: Vec::new(),
-            })
-            .unwrap();
-            conn.execute(
-                "INSERT INTO face_learning_profiles (
-                    artifact_version, embedding_model_id, feature_schema_version, model_kind,
-                    parameters, training_evidence_json, validation_report_json, stage, status
-                 ) VALUES (1, 'arcface/test', 1, 'logistic', ?1, ?2, ?3, 'suggestion', 'active')",
-                rusqlite::params![
-                    serde_json::to_vec(&logistic_bundle()).unwrap(),
-                    evidence,
-                    report
-                ],
-            )
-            .unwrap();
-            let profile_id = conn.last_insert_rowid();
-
-            let candidates = select_questions(&conn, &QuestionSelectionConfig::default()).unwrap();
-            assert_eq!(candidates.len(), 1, "fixture must produce one question");
-            let stored = replace_pending_questions(&conn, &candidates).unwrap();
-            assert_eq!(stored.len(), 1);
-            (conn, stored[0].id, profile_id)
-        }
-
-        pub fn stub_evidence() -> videre_core::face_learning::DecisionEvidence {
-            use videre_core::face_learning::{
-                Calibration, DecisionKind, DecisionOutcome, DecisionTarget, FeatureContribution,
-                ValidationSummary, EVIDENCE_SCHEMA_VERSION, FEATURE_SCHEMA_VERSION,
-            };
-            let evidence = videre_core::face_learning::DecisionEvidence {
-                schema_version: EVIDENCE_SCHEMA_VERSION,
-                profile_id: 1,
-                feature_schema_version: FEATURE_SCHEMA_VERSION,
-                decision_kind: DecisionKind::Membership,
-                outcome: DecisionOutcome::Allowed,
-                subject_face_ids: vec![10],
-                target: DecisionTarget::Person("alice".into()),
-                intercept: 0.0,
-                raw_logit: 0.0,
-                calibration: Calibration {
-                    intercept: 0.0,
-                    slope: 1.0,
-                },
-                calibrated_confidence: 0.5,
-                threshold: 0.5,
-                margin: 0.0,
-                features: vec![FeatureContribution {
-                    name: "similarity_mean".into(),
-                    value: 1.0,
-                    contribution: 0.0,
-                }],
-                support_face_ids: vec![12, 13],
-                rule_vetoes: Vec::new(),
-                validation: ValidationSummary {
-                    protocol_version: 1,
-                    datasets: 1,
-                    pair_precision: None,
-                    pair_recall: None,
-                    suggestion_precision: None,
-                    suggestion_coverage: None,
-                },
-            };
-            evidence.validate().unwrap();
-            evidence
-        }
-
-        pub fn context(profile_id: i64) -> TeachingContext {
-            TeachingContext {
-                embedding_model_id: "arcface/test".into(),
-                active_profile_id: Some(profile_id),
-                record: true,
-            }
-        }
-    }
-
-    use question_fixture as qf;
-
+    /// A real initialized library: foreign keys verified on, the canonical DDL
+    /// in place. The public face paths must work unchanged and orphan writes
+    /// must fail.
     #[test]
-    fn deleting_a_person_supersedes_questions_and_advances_once() {
-        let (conn, _question_id, _profile_id) = qf::library();
-        // A second pending question for the same identity: both must go.
-        let second = videre_core::face_learning::StoredQuestion {
-            id: 999,
-            status: videre_core::face_learning::QuestionStatus::Pending,
-            subject_face_ids: vec![10],
-            support_face_ids: vec![12, 13],
-            target_identity: "alice".into(),
-            target_display: "Alice".into(),
-            profile_id: 1,
-            model_kind: "logistic".into(),
-            representative_face_id: 10,
-            cluster_id: 1,
-            evidence_revision: "another-revision".into(),
-            evidence: qf::stub_evidence(),
-            created_at: "2026-01-01 00:00:00".into(),
-            decided_at: None,
-        };
-        let _ = second;
-        delete_person_with_learning(&conn, "Alice").unwrap();
-        let superseded: i64 = conn
-            .query_row(
-                "SELECT count(*) FROM face_learning_questions WHERE status = 'superseded'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(superseded, 1, "the pending question must be superseded");
-        let state = learning_state(&conn).unwrap();
-        assert_eq!(state.generation, 1, "exactly one generation advance");
-        let invalidated: i64 = conn
-            .query_row(
-                "SELECT count(*) FROM face_learning_events WHERE eligible = 0",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(invalidated, 0, "no events existed to invalidate");
-    }
-
-    #[test]
-    fn the_journal_reports_availability_without_rewriting_history() {
-        let (conn, _question_id, profile_id) = qf::library();
-        // Produce journal entries, then remove a face an entry points at.
-        assign_with_learning(&conn, &[10, 11], "Alice", &qf::context(profile_id)).unwrap();
-        let subject_event_id = face_learning_events(&conn, 50, None, Some("arcface/test"))
-            .unwrap()
-            .iter()
-            .find(|proof| proof.event.faces.iter().any(|face| face.face_id == 10))
-            .map(|proof| proof.event.id)
-            .unwrap();
-        // A re-detection rebuild replaces face rows; simulate the row the
-        // entry references vanishing.
-        conn.execute("DELETE FROM faces WHERE id = 10", []).unwrap();
-
-        let proofs = face_learning_events(&conn, 50, None, Some("arcface/test")).unwrap();
-        let proof = proofs
-            .iter()
-            .find(|proof| proof.event.id == subject_event_id)
-            .unwrap();
-        assert!(!proof.source_available, "the subject face is gone");
-        assert!(!proof.incompatible, "same model and schema stay usable");
-        assert!(proof.event.eligible, "missing provenance stays eligible");
-
-        // A different configured model marks the entry incompatible.
-        let proofs = face_learning_events(&conn, 50, None, Some("other/model")).unwrap();
-        let proof = proofs
-            .iter()
-            .find(|proof| proof.event.id == subject_event_id)
-            .unwrap();
-        assert!(proof.incompatible);
-
-        // Invalidation changes eligibility columns only, never the features.
-        let (conn, question_id, profile_id) = qf::library();
-        answer_question_with_learning(
-            &conn,
-            question_id,
-            videre_core::face_learning::QuestionAnswer::No,
-            &qf::context(profile_id),
-        )
-        .unwrap();
-        let before: String = conn
-            .query_row(
-                "SELECT feature_snapshot_json FROM face_learning_events WHERE id = 1",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        delete_person_with_learning(&conn, "Alice").unwrap();
-        let after: String = conn
-            .query_row(
-                "SELECT feature_snapshot_json FROM face_learning_events WHERE id = 1",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(before, after, "historical feature JSON never mutates");
-    }
-
-    #[test]
-    fn yes_confirms_the_target_and_teaches_positive_membership() {
-        let (conn, question_id, profile_id) = qf::library();
-        let outcome = answer_question_with_learning(
-            &conn,
-            question_id,
-            QuestionAnswer::Yes,
-            &qf::context(profile_id),
-        )
-        .unwrap();
-        assert_eq!(outcome.status, "answered");
-        let ack = outcome.acknowledgement.expect("yes must teach");
-        assert_eq!(ack.event_ids.len(), 1);
-        assert_eq!(ack.generation, 1);
-
-        let labeled: i64 = conn
-            .query_row(
-                "SELECT count(*) FROM faces WHERE id IN (10, 11) AND person_label = 'alice'
-                 AND confirmed = 1 AND cluster_id IS NULL",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(labeled, 2, "yes labels the whole subject cluster");
-
-        let event: (String, String, String) = conn
-            .query_row(
-                "SELECT action_kind, outcome, target_identity FROM face_learning_events",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-            )
-            .unwrap();
-        assert_eq!(event.0, "question_yes");
-        assert_eq!(event.1, "positive");
-        assert_eq!(event.2, "alice");
-    }
-
-    #[test]
-    fn no_teaches_negative_without_labeling() {
-        let (conn, question_id, profile_id) = qf::library();
-        let outcome = answer_question_with_learning(
-            &conn,
-            question_id,
-            QuestionAnswer::No,
-            &qf::context(profile_id),
-        )
-        .unwrap();
-        assert_eq!(outcome.status, "answered");
-
-        let untouched: i64 = conn
-            .query_row(
-                "SELECT count(*) FROM faces WHERE id IN (10, 11) AND confirmed = 0
-                 AND person_label IS NULL AND cluster_id = 1",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(untouched, 2, "no must not label");
-
-        let event: (String, String) = conn
-            .query_row(
-                "SELECT action_kind, outcome FROM face_learning_events",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .unwrap();
-        assert_eq!(event.0, "question_no");
-        assert_eq!(event.1, "negative");
-    }
-
-    #[test]
-    fn skip_only_changes_delivery_state() {
-        let (conn, question_id, profile_id) = qf::library();
-        let outcome = answer_question_with_learning(
-            &conn,
-            question_id,
-            QuestionAnswer::Skip,
-            &qf::context(profile_id),
-        )
-        .unwrap();
-        assert_eq!(outcome.status, "skipped");
-        assert!(outcome.acknowledgement.is_none());
-
-        let events: i64 = conn
-            .query_row("SELECT count(*) FROM face_learning_events", [], |row| {
-                row.get(0)
-            })
-            .unwrap();
-        assert_eq!(events, 0, "skip produces no event");
-        let state = learning_state(&conn).unwrap();
-        assert_eq!(state.generation, 0, "skip does not advance generation");
-    }
-
-    #[test]
-    fn stale_answers_conflict_without_partial_writes() {
-        // Already-labeled subject.
-        let (conn, question_id, profile_id) = qf::library();
-        assign(&conn, &[10, 11], "Bob").unwrap();
-        assert!(matches!(
-            answer_question_with_learning(
-                &conn,
-                question_id,
-                QuestionAnswer::Yes,
-                &qf::context(profile_id)
-            ),
-            Err(Error::Conflict)
-        ));
-        let events: i64 = conn
-            .query_row("SELECT count(*) FROM face_learning_events", [], |row| {
-                row.get(0)
-            })
-            .unwrap();
-        assert_eq!(events, 0, "a conflict must not teach");
-        assert_eq!(
-            videre_core::face_learning::stored_question(&conn, question_id)
-                .unwrap()
-                .unwrap()
-                .status,
-            QuestionStatus::Superseded
-        );
-
-        // Removed target person. With face labels referencing people, the
-        // row can only go once no face carries the label.
-        let (conn, question_id, profile_id) = qf::library();
-        conn.execute_batch(
-            "UPDATE faces SET person_label = NULL, confirmed = 0 WHERE person_label = 'alice';
-             DELETE FROM people WHERE name = 'alice';",
-        )
-        .unwrap();
-        assert!(matches!(
-            answer_question_with_learning(
-                &conn,
-                question_id,
-                QuestionAnswer::No,
-                &qf::context(profile_id)
-            ),
-            Err(Error::Conflict)
-        ));
-        assert_eq!(
-            videre_core::face_learning::stored_question(&conn, question_id)
-                .unwrap()
-                .unwrap()
-                .status,
-            QuestionStatus::Superseded
-        );
-
-        // A different active profile.
-        let (conn, question_id, profile_id) = qf::library();
-        conn.execute("UPDATE face_learning_profiles SET status = 'retired'", [])
-            .unwrap();
-        let _ = profile_id;
-        assert!(matches!(
-            answer_question_with_learning(&conn, question_id, QuestionAnswer::No, &qf::context(99)),
-            Err(Error::Conflict)
-        ));
-        assert_eq!(
-            videre_core::face_learning::stored_question(&conn, question_id)
-                .unwrap()
-                .unwrap()
-                .status,
-            QuestionStatus::Superseded
-        );
-
-        // Support set changed: the evidence revision no longer matches.
-        let (conn, question_id, profile_id) = qf::library();
-        assign(&conn, &[13], "Alice").unwrap();
-        remove_face(&conn, 12).unwrap();
-        insert_face_with_score(&conn, 14, None, 0.9);
-        assign(&conn, &[14], "Alice").unwrap();
-        assert!(matches!(
-            answer_question_with_learning(
-                &conn,
-                question_id,
-                QuestionAnswer::No,
-                &qf::context(profile_id)
-            ),
-            Err(Error::Conflict)
-        ));
-        let question = videre_core::face_learning::stored_question(&conn, question_id)
-            .unwrap()
-            .unwrap();
-        assert_eq!(
-            question.status,
-            videre_core::face_learning::QuestionStatus::Superseded
-        );
-        assert!(pending_identity_questions(&conn, 5).unwrap().is_empty());
-    }
-
-    fn insert_face_with_score(conn: &Connection, id: i64, cluster: Option<i64>, score: f64) {
-        conn.execute(
-            "INSERT INTO faces (id, hash, bbox, embedding, cluster_id, confirmed, det_score, blur)
-             VALUES (?1, 'h' || ?1, '0,0,80,80', ?2, ?3, 0, ?4, 600.0)",
-            rusqlite::params![id, qf::embedding_blob(1.0, 0.0), cluster, score],
-        )
-        .unwrap();
-    }
-
-    #[test]
-    fn faces_moved_out_of_the_question_cluster_conflict() {
-        let (conn, question_id, profile_id) = qf::library();
-        // A recluster reassigned one subject face after the question was
-        // built: the evidence no longer describes the displayed cluster.
-        conn.execute("UPDATE faces SET cluster_id = 9 WHERE id = 11", [])
-            .unwrap();
-        assert!(matches!(
-            answer_question_with_learning(
-                &conn,
-                question_id,
-                QuestionAnswer::Yes,
-                &qf::context(profile_id)
-            ),
-            Err(Error::Conflict)
-        ));
-
-        let labeled: i64 = conn
-            .query_row(
-                "SELECT count(*) FROM faces WHERE id IN (10, 11) AND confirmed = 1",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(labeled, 0, "a stale cluster must not label");
-        let events: i64 = conn
-            .query_row("SELECT count(*) FROM face_learning_events", [], |row| {
-                row.get(0)
-            })
-            .unwrap();
-        assert_eq!(events, 0);
-        let question = videre_core::face_learning::stored_question(&conn, question_id)
-            .unwrap()
-            .unwrap();
-        assert_eq!(
-            question.status,
-            videre_core::face_learning::QuestionStatus::Superseded
-        );
-        assert!(pending_identity_questions(&conn, 5).unwrap().is_empty());
-    }
-
-    #[test]
-    fn refresh_creates_question_tables_for_a_first_training_cycle() {
-        let (conn, _, _) = qf::library();
-        conn.execute_batch(
-            "DROP TABLE face_learning_question_faces;
-             DROP TABLE face_learning_questions;",
-        )
-        .unwrap();
-
-        let questions = refresh_identity_questions(&conn, &QuestionSelectionConfig::default())
-            .expect("a promoted profile should create the question tables");
-        assert_eq!(questions.len(), 1);
-        assert_eq!(pending_identity_questions(&conn, 5).unwrap().len(), 1);
-    }
-
-    /// A real initialized version-2 library: foreign keys verified on, the
-    /// canonical DDL in place. The public face paths must work unchanged and
-    /// orphan writes must fail.
-    #[test]
-    fn v2_library_enforces_keys_through_the_public_paths() {
-        use videre_core::face_learning::QuestionAnswer as Answer;
+    fn an_initialized_library_enforces_keys_through_the_public_paths() {
         let root = tempfile::tempdir().unwrap();
         let cache = tempfile::tempdir().unwrap();
         let ctx = videre_core::library::LibraryContext::new(root.path(), cache.path()).unwrap();
@@ -3529,54 +1538,27 @@ mod never_run_tests {
             .unwrap();
         assert_eq!(keys_on, 1, "an initialized library verifies enforcement");
 
-        // Seed two people with one confirmed face each, through the public
-        // assign path, after detectable faces exist as unassigned clusters.
         conn.execute_batch(
             "INSERT INTO faces (id, hash, bbox, embedding, cluster_id, confirmed, det_score, blur) VALUES
                 (1, 'k1', '0,0,9,9', X'0000', 7, 0, 0.9, 600.0),
                 (2, 'k2', '0,0,9,9', X'0000', 7, 0, 0.9, 600.0);
-             INSERT INTO people (name, full_name) VALUES ('alice', 'Alice'), ('bob', 'Bob');",
+             INSERT INTO people (name, full_name) VALUES ('ayse', 'Ayşe'), ('bulent', 'Bülent');",
         )
         .unwrap();
-        assign(&conn, &[1], "Alice").unwrap();
-        assign(&conn, &[2], "Bob").unwrap();
+        assign(&conn, &[1], "Ayşe").unwrap();
+        assign(&conn, &[2], "Bülent").unwrap();
 
-        // Orphan writes fail: a face labeled with an unknown person, and an
-        // event provenance row with no parent event.
+        // An orphan write fails: a face labeled with an unknown person.
         assert!(conn
             .execute(
                 "INSERT INTO faces (hash,bbox,embedding,person_label,confirmed)
-                 VALUES ('k9','0,0,9,9',X'0000','ghost',1)",
-                [],
-            )
-            .is_err());
-        assert!(conn
-            .execute(
-                "INSERT INTO face_learning_event_faces (event_id, face_id, role, ordinal)
-                 VALUES (999, 1, 'subject', 0)",
+                 VALUES ('k9','0,0,9,9',X'0000','hayalet',1)",
                 [],
             )
             .is_err());
 
-        // Parent-first inserts succeed.
-        conn.execute(
-            "INSERT INTO face_learning_events (id, action_kind, decision_kind, outcome,
-                embedding_model_id, feature_schema_version, target_identity,
-                feature_snapshot_json, support_count)
-             VALUES (1, 'assign_face', 'membership', 'positive', 'x/1', 1, 'alice', '{}', 0)",
-            [],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO face_learning_event_faces (event_id, face_id, role, ordinal)
-             VALUES (1, 1, 'subject', 0)",
-            [],
-        )
-        .unwrap();
-
-        // Deleting a person invalidates their evidence; the face the user
-        // assigned becomes unassigned again.
-        delete_person_with_learning(&conn, "Alice").unwrap();
+        // Deleting a person returns the face to the unassigned pool.
+        delete_person(&conn, "Ayşe").unwrap();
         let state: (i64, Option<String>) = conn
             .query_row(
                 "SELECT confirmed, person_label FROM faces WHERE id = 1",
@@ -3586,85 +1568,12 @@ mod never_run_tests {
             .unwrap();
         assert_eq!(state, (0, None));
 
-        // A stale question is rejected by the answer path.
-        let question = videre_core::face_learning::select_questions(
-            &conn,
-            &videre_core::face_learning::QuestionSelectionConfig::default(),
-        )
-        .unwrap();
-        if !question.is_empty() {
-            let stored =
-                videre_core::face_learning::replace_pending_questions(&conn, &question).unwrap();
-            conn.execute(
-                "UPDATE face_learning_questions SET evidence_revision = 'stale' WHERE id = ?1",
-                rusqlite::params![stored[0].id],
-            )
-            .unwrap();
-            let context = TeachingContext {
-                embedding_model_id: "x/1".into(),
-                active_profile_id: None,
-                record: true,
-            };
-            assert!(matches!(
-                answer_question_with_learning(&conn, stored[0].id, Answer::Yes, &context),
-                Err(Error::Conflict)
-            ));
-        }
-
-        // Reset clears every learning table and passes foreign_key_check.
         videre_core::face_db::reset_all(&conn).unwrap();
-        for table in [
-            "face_learning_events",
-            "face_learning_event_faces",
-            "face_learning_questions",
-            "face_learning_question_faces",
-            "face_learning_profiles",
-        ] {
-            let n: i64 = conn
-                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0))
-                .unwrap();
-            assert_eq!(n, 0, "{table} must be empty after reset");
-        }
         let violations: i64 = conn
             .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |r| {
                 r.get(0)
             })
             .unwrap();
         assert_eq!(violations, 0);
-    }
-
-    #[test]
-    fn yes_cannot_label_without_evidence() {
-        let (conn, question_id, profile_id) = qf::library();
-        conn.execute_batch(
-            "CREATE TRIGGER abort_question_events
-             BEFORE INSERT ON face_learning_events
-             BEGIN SELECT RAISE(ABORT, 'injected event failure'); END;",
-        )
-        .unwrap();
-        assert!(answer_question_with_learning(
-            &conn,
-            question_id,
-            QuestionAnswer::Yes,
-            &qf::context(profile_id)
-        )
-        .is_err());
-
-        let labeled: i64 = conn
-            .query_row(
-                "SELECT count(*) FROM faces WHERE id IN (10, 11) AND confirmed = 1",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(labeled, 0, "yes cannot label without its evidence row");
-
-        let question = videre_core::face_learning::stored_question(&conn, question_id)
-            .unwrap()
-            .unwrap();
-        assert_eq!(
-            question.status,
-            videre_core::face_learning::QuestionStatus::Pending
-        );
     }
 }

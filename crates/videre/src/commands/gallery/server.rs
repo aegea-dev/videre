@@ -451,7 +451,6 @@ mod location_cluster_tests {
         Arc::new(AppState {
             conn: Arc::new(Mutex::new(conn)),
             events_cache: Mutex::new(None),
-            learning: None,
             shutdown_tx: Mutex::new(Some(shutdown_tx)),
             model_id: String::new(),
             report_heic: false,
@@ -2619,28 +2618,10 @@ struct MarkBody {
 }
 
 impl AppState {
-    /// Whether face learning is on for this library (`faces.learning`), from
-    /// the settings as last read.
-    pub(super) fn learning_enabled(&self) -> bool {
-        self.settings
-            .read()
-            .is_ok_and(|s| super::settings::face_learning_on(&s))
-    }
-
     /// Replace the remembered settings with what was just read from disk.
     fn remember_settings(&self, effective: &serde_json::Value) {
         if let Ok(mut s) = self.settings.write() {
             *s = effective.clone();
-        }
-    }
-
-    /// Tell the learning worker a teaching mutation committed. Only while
-    /// learning is on; off, the mutation recorded nothing to train on.
-    pub(super) fn notify_learning(&self) {
-        if let Some(learning) = &self.learning {
-            if self.learning_enabled() {
-                learning.notify();
-            }
         }
     }
 }
@@ -2648,9 +2629,6 @@ impl AppState {
 pub(crate) struct AppState {
     pub(super) conn: Arc<Mutex<Connection>>,
     events_cache: Mutex<Option<EventsCacheEntry>>,
-    /// Background face-learning worker; present whenever people pages are
-    /// served. Teaching mutations notify it after their commit.
-    pub(super) learning: Option<super::learning::LearningCoordinator>,
     shutdown_tx: Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
     pub(super) model_id: String,
     report_heic: bool,
@@ -4953,28 +4931,24 @@ async fn handle_assign(
     State(state): State<Arc<AppState>>,
     axum::extract::Path(name): axum::extract::Path<String>,
     AxumJson(req): AxumJson<AssignFacesBody>,
-) -> Result<Json<videre_api::LearningAcknowledgement>, ApiError> {
-    let acknowledgement = {
-        let conn = state.conn.lock().map_err(poisoned)?;
-        let context = teaching_context(&conn, &state);
-        // The route keeps its historical meaning: naming a cluster after a
-        // person who does not exist yet creates that person.
-        let exists: bool = conn
-            .query_row(
-                "SELECT EXISTS(SELECT 1 FROM people WHERE name = ?1)",
-                [&name],
-                |row| row.get(0),
-            )
-            .map_err(internal)?;
-        let result = if exists {
-            videre_api::assign_with_learning(&conn, &req.face_ids, &name, &context)
-        } else {
-            videre_api::new_person_with_learning(&conn, &req.face_ids, &name, &context)
-        };
-        result.map_err(api_error)?
-    };
-    state.notify_learning();
-    Ok(Json(acknowledgement))
+) -> Result<StatusCode, ApiError> {
+    let conn = state.conn.lock().map_err(poisoned)?;
+    // The route keeps its historical meaning: naming a cluster after a
+    // person who does not exist yet creates that person.
+    let exists: bool = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM people WHERE name = ?1)",
+            [&name],
+            |row| row.get(0),
+        )
+        .map_err(internal)?;
+    if exists {
+        videre_api::assign_to_person(&conn, &req.face_ids, &name)
+    } else {
+        videre_api::new_person(&conn, &req.face_ids, &name)
+    }
+    .map(|_| StatusCode::OK)
+    .map_err(api_error)
 }
 
 /// Set marks on one photo from the gallery. Goes through the same
@@ -5003,63 +4977,31 @@ async fn handle_set_mark(
 async fn handle_new_person(
     State(state): State<Arc<AppState>>,
     AxumJson(req): AxumJson<NewPersonRequest>,
-) -> Result<Json<videre_api::LearningAcknowledgement>, ApiError> {
-    let acknowledgement = {
-        let conn = state.conn.lock().map_err(poisoned)?;
-        videre_api::new_person_with_learning(
-            &conn,
-            &req.face_ids,
-            &req.name,
-            &teaching_context(&conn, &state),
-        )
-        .map_err(api_error)?
-    };
-    state.notify_learning();
-    Ok(Json(acknowledgement))
-}
-
-pub(super) fn teaching_context(conn: &Connection, state: &AppState) -> videre_api::TeachingContext {
-    videre_api::TeachingContext {
-        embedding_model_id: state.model_id.clone(),
-        active_profile_id: videre_core::face_learning::active_profile(conn)
-            .ok()
-            .flatten()
-            .map(|profile| profile.id),
-        record: state.learning_enabled(),
-    }
+) -> Result<StatusCode, ApiError> {
+    let conn = state.conn.lock().map_err(poisoned)?;
+    videre_api::new_person(&conn, &req.face_ids, &req.name)
+        .map(|_| StatusCode::OK)
+        .map_err(api_error)
 }
 
 async fn handle_remove_face(
     State(state): State<Arc<AppState>>,
     axum::extract::Path(id): axum::extract::Path<i64>,
-) -> Result<Json<videre_api::LearningAcknowledgement>, ApiError> {
-    let acknowledgement = {
-        let conn = state.conn.lock().map_err(poisoned)?;
-        videre_api::remove_face_with_learning(&conn, id, &teaching_context(&conn, &state))
-            .map_err(api_error)?
-    };
-    state.notify_learning();
-    Ok(Json(acknowledgement))
+) -> Result<StatusCode, ApiError> {
+    let conn = state.conn.lock().map_err(poisoned)?;
+    videre_api::remove_face(&conn, id)
+        .map(|_| StatusCode::OK)
+        .map_err(api_error)
 }
 
 async fn handle_delete_person(
     State(state): State<Arc<AppState>>,
     axum::extract::Path(name): axum::extract::Path<String>,
-) -> Result<Json<videre_api::LearningAcknowledgement>, ApiError> {
-    let acknowledgement = {
-        let conn = state.conn.lock().map_err(poisoned)?;
-        videre_api::delete_person_with_learning(&conn, &name)
-            .map_err(api_error)?
-            .unwrap_or_else(|| videre_api::LearningAcknowledgement {
-                generation: videre_core::face_learning::learning_state(&conn)
-                    .map(|state| state.generation)
-                    .unwrap_or(0),
-                event_ids: Vec::new(),
-                message_key: "person_deleted_without_learning".into(),
-            })
-    };
-    state.notify_learning();
-    Ok(Json(acknowledgement))
+) -> Result<StatusCode, ApiError> {
+    let conn = state.conn.lock().map_err(poisoned)?;
+    videre_api::delete_person(&conn, &name)
+        .map(|_| StatusCode::OK)
+        .map_err(api_error)
 }
 
 async fn handle_set_full_name(
@@ -5076,14 +5018,11 @@ async fn handle_set_full_name(
 async fn handle_dissolve_cluster(
     State(state): State<Arc<AppState>>,
     axum::extract::Path(id): axum::extract::Path<i64>,
-) -> Result<Json<videre_api::LearningAcknowledgement>, ApiError> {
-    let acknowledgement = {
-        let conn = state.conn.lock().map_err(poisoned)?;
-        videre_api::dissolve_cluster_with_learning(&conn, id, &teaching_context(&conn, &state))
-            .map_err(api_error)?
-    };
-    state.notify_learning();
-    Ok(Json(acknowledgement))
+) -> Result<StatusCode, ApiError> {
+    let conn = state.conn.lock().map_err(poisoned)?;
+    videre_api::dissolve_cluster(&conn, id)
+        .map(|_| StatusCode::OK)
+        .map_err(api_error)
 }
 
 async fn handle_set_primary(
@@ -5112,9 +5051,6 @@ async fn handle_quit(State(state): State<Arc<AppState>>) -> StatusCode {
         if let Some(tx) = lock.take() {
             let _ = tx.send(());
         }
-    }
-    if let Some(learning) = &state.learning {
-        learning.shutdown();
     }
     StatusCode::OK
 }
@@ -5761,14 +5697,6 @@ async fn serve_faces_async(
         Ok(_) => {}
         Err(e) => tracing::warn!("could not migrate person names: {e}"),
     }
-    if opts.serve_faces_ui {
-        // The first questions request can precede the status request or the
-        // worker's first promoted profile. Make that resource ready at startup.
-        // The learning tables too: an older library gains columns here (the
-        // waiting ask), before the worker or any handler reads the state.
-        videre_core::face_learning::ensure_learning_tables(&conn)?;
-        videre_core::face_learning::ensure_question_tables(&conn)?;
-    }
     // Only --all needs vectors. A missing model database disables the
     // similarity search with a note rather than failing the whole report,
     // which works perfectly well without embeddings.
@@ -5782,37 +5710,12 @@ async fn serve_faces_async(
         }
     }
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
-    // Two connections share the database now, so each waits briefly on the
-    // other's write rather than failing at once.
-    conn.busy_timeout(super::learning::BUSY_TIMEOUT)?;
+    // Another videre process may be writing (watch beside the gallery), so a
+    // request waits briefly on its write rather than failing at once.
+    conn.busy_timeout(std::time::Duration::from_secs(5))?;
     let conn = Arc::new(Mutex::new(conn));
     let settings = super::settings::remember(&opts.context.library.paths.state);
-    let learning = if opts.serve_faces_ui {
-        // Its own connection and thread: training never holds the one every
-        // request shares.
-        let engine = videre_core::db::open_wal(db)?;
-        engine.busy_timeout(super::learning::BUSY_TIMEOUT)?;
-        let remembered = settings.clone();
-        Some(super::learning::spawn(super::learning::LearningDeps {
-            conn: engine,
-            enabled: Arc::new(move || {
-                remembered
-                    .read()
-                    .is_ok_and(|s| super::settings::face_learning_on(&s))
-            }),
-            embedding_model_id: opts.model_id.clone(),
-            config: videre_core::face_learning::TrainingConfig::default(),
-            gates: videre_core::face_learning::PromotionGates::shipped(),
-            questions: videre_core::face_learning::QuestionSelectionConfig::default(),
-            train: Arc::new(|snapshot, config, gates| {
-                videre_core::face_learning::train_and_select_candidate(snapshot, config, gates)
-            }),
-        })?)
-    } else {
-        None
-    };
     let state = Arc::new(AppState {
-        learning,
         conn,
         events_cache: Mutex::new(None),
         shutdown_tx: Mutex::new(Some(shutdown_tx)),
@@ -5918,27 +5821,6 @@ async fn serve_faces_async(
         .route(
             "/api/clusters/{id}",
             get(handle_cluster_api).delete(handle_dissolve_cluster),
-        )
-        // face learning
-        .route(
-            "/api/face-learning/status",
-            get(super::learning::handle_learning_status),
-        )
-        .route(
-            "/api/face-learning/questions",
-            get(super::learning::handle_learning_questions),
-        )
-        .route(
-            "/api/face-learning/questions/{id}/answer",
-            post(super::learning::handle_learning_answer),
-        )
-        .route(
-            "/api/face-learning/events",
-            get(super::learning::handle_learning_events),
-        )
-        .route(
-            "/api/face-learning/events/{id}",
-            get(super::learning::handle_learning_event_detail),
         )
         // control
         .route("/api/quit", post(handle_quit))
@@ -6148,7 +6030,6 @@ mod thumbnail_tests {
         Arc::new(AppState {
             conn: Arc::new(Mutex::new(conn)),
             events_cache: Mutex::new(None),
-            learning: None,
             shutdown_tx: Mutex::new(Some(shutdown_tx)),
             model_id: String::new(),
             report_heic: false,
@@ -6725,11 +6606,7 @@ mod settings_api_tests {
     async fn import_carries_face_settings_and_a_file_without_them_keeps_them() {
         let dir = tempfile::tempdir().unwrap();
         let app = app(gallery_state(dir.path()));
-        patch_settings(
-            &app,
-            json!({"faces": {"learning": true, "clustering": {"eps": 0.5}}}),
-        )
-        .await;
+        patch_settings(&app, json!({"faces": {"clustering": {"eps": 0.5}}})).await;
 
         // An export made before faces were exported holds routes only.
         let (status, body) = send(
@@ -6740,7 +6617,7 @@ mod settings_api_tests {
         )
         .await;
         assert_eq!(status, StatusCode::OK);
-        assert_eq!(body["overrides"]["faces"]["learning"], true);
+        assert_eq!(body["overrides"]["faces"]["clustering"]["eps"], 0.5);
 
         let (status, body) = send(
             &app,

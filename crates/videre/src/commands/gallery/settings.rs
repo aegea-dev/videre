@@ -352,11 +352,6 @@ pub(crate) fn remember(state_dir: &Path) -> Remembered {
     std::sync::Arc::new(std::sync::RwLock::new(snapshot(&path(state_dir)).effective))
 }
 
-/// Whether face learning runs for this library (`faces.learning`).
-pub(crate) fn face_learning_on(effective: &Value) -> bool {
-    effective["faces"]["learning"].as_bool() == Some(true)
-}
-
 /// The route to reopen the gallery at: the saved one when it is a safe local
 /// page, otherwise `/`. The client saves whatever it is on; this is the one
 /// place that decides whether it is fit to hand to a browser.
@@ -547,18 +542,6 @@ mod tests {
     }
 
     #[test]
-    fn face_learning_is_off_unless_set_true() {
-        let dir = tempfile::tempdir().unwrap();
-        let p = path(dir.path());
-        let on = || face_learning_on(&snapshot(&p).effective);
-        assert!(!on());
-        std::fs::write(&p, r#"{"faces":{"learning":true}}"#).unwrap();
-        assert!(on());
-        std::fs::write(&p, r#"{"faces":{"learning":"yes"}}"#).unwrap();
-        assert!(!on());
-    }
-
-    #[test]
     fn load_tells_absent_valid_and_invalid_apart() {
         let dir = tempfile::tempdir().unwrap();
         let p = path(dir.path());
@@ -689,7 +672,6 @@ mod tests {
             paths,
             [
                 "faces.clustering.eps",
-                "faces.learning",
                 "routes.duplicates.kinds",
                 "routes.files.pageSize",
                 "routes.files.tile.colGap",

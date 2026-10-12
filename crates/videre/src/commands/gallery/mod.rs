@@ -12,7 +12,6 @@
 mod bulk;
 mod config_form;
 mod events;
-mod learning;
 mod recluster;
 mod refusal;
 mod rotate;
