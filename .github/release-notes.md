@@ -14,7 +14,7 @@ Or download an archive below and put `videre` on your `PATH`. No Rust toolchain,
 
 Each has a `.sha256` alongside it. Every archive is downloaded onto a clean machine and actually run before this release is published.
 
-Model weights download on first use, not at install: ~780 MB for `videre embed`, ~180 MB for `videre faces`. `scan`, `dedupe`, `fix-dates`, `prune`, `stats` and `locations` need no model at all.
+Model weights download on first use, not at install: ~1.5 GB for semantic search (`videre embed`, then `search`, `classify` and the gallery's search), ~180 MB for `videre faces`. `scan`, `dedupe`, `fix-dates`, `prune`, `stats`, `status`, `locations`, `import`, `export`, `mark` and `tag` need no model at all.
 
 Intel Macs are not supported: ONNX Runtime ships no prebuilt binaries for `x86_64-apple-darwin`.
 
