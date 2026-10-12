@@ -344,8 +344,8 @@ fn build_search(
         // An agent asks for results, not a file on the server's disk.
         html: None,
         // Built from the same flag groups the CLI flattens, so the two surfaces
-        // resolve through one vocabulary rather than drifting apart, which is
-        // the rule in CLAUDE.md that exists because they have drifted before.
+        // resolve through one vocabulary rather than drifting apart, as they
+        // have before.
         media: super::selection_args::MediaArgs {
             media_type: params.media_type.clone(),
             ext: params.ext.clone(),

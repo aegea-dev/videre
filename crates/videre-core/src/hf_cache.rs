@@ -2,7 +2,7 @@
 //!
 //! Both SigLIP (`videre embed`) and InsightFace (`videre faces`) resolve their
 //! weights through hf-hub into this cache. Note it is **not** `~/.cache/ort/`,
-//! which `CLAUDE.md` claimed for months and which has never existed.
+//! which was long assumed and has never existed.
 //!
 //! The opt-in model tests pass this path to model-backed children, so it must
 //! resolve exactly as the pinned hf-hub loader does, or a child would download

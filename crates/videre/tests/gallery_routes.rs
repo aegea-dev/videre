@@ -1293,8 +1293,8 @@ fn search_fixture() -> TestLibrary {
 }
 
 // :warning: These use `?like=`, never `?q=`. A text query needs the model, and
-// a test that downloads 778MB of SigLIP is the exact failure `CLAUDE.md` records
-// from `classify`. Ranking against a stored vector needs no model at all, which
+// a test that downloads 778MB of SigLIP is a failure `classify` once had.
+// Ranking against a stored vector needs no model at all, which
 // is precisely why the stored path exists.
 
 #[test]
@@ -1408,7 +1408,7 @@ fn an_example_with_no_embedding_is_an_error() {
 /// :warning: **A gallery whose library nobody searches must never load a model.**
 ///
 /// The search endpoint holds a lazily-loaded embedder, and "lazily" is the whole
-/// contract. `CLAUDE.md` records what the alternative costs: a model loaded
+/// contract. The alternative has been paid for: a model loaded
 /// before there was work to do downloaded 778MB from inside a unit test, and on
 /// CI those weights then woke a skipped test and took one job from 3 minutes to
 /// nearly 40.

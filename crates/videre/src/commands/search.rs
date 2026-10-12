@@ -388,8 +388,8 @@ impl QueryEmbedder for FreshEmbedder {
 /// an embedder at all.
 ///
 /// :warning: **It must stay lazy.** A server whose library nobody searches must
-/// never load a model, for the reason `CLAUDE.md` records: a model loaded before
-/// there was work to do once downloaded 778MB from inside a unit test.
+/// never load a model: a model loaded before there was work to do once
+/// downloaded 778MB from inside a unit test.
 pub(crate) struct CachedEmbedder<'a>(
     pub(crate) &'a std::sync::Mutex<Option<videre_ml::model::Embedder>>,
 );

@@ -76,8 +76,8 @@ silently resolving different versions than the ones tested locally.
   is, how to install it, a short quickstart, and links here.
 - **This site** is the user-facing reference: every command, every flag, and how
   the pieces fit together.
-- **CLAUDE.md** is for people and agents working *on* videre: build and test
-  invariants, measured findings, and the traps that are easy to reintroduce.
+- **CLAUDE.md** is for people and agents working *on* videre: building,
+  testing and getting a change in.
 
 When something is true for users, it belongs here, and the other two link to it
 rather than restating it.
