@@ -19,7 +19,12 @@
       "sort": { "field": "date", "dir": "desc" },
       "tile": { "rowHeight": 280, "colGap": 10, "rowGap": 10 }
     },
-    "date": { "pageSize": 200 },
+    "date": {
+      "pageSize": 200,
+      "year": { "width": 300, "height": 200 },
+      "month": { "width": 220, "height": 150 },
+      "day": { "width": 160, "height": 110 }
+    },
     "search": { "pageSize": 96 },
     "events": { "sort": { "field": "date", "dir": "desc" } },
     "people": { "align": "right", "reclusterOpen": false, "pageSize": 200 },

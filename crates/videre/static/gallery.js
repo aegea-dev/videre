@@ -822,12 +822,74 @@ function dateRootCrumb(){
   return LIVE_SERVER ? '<a href="'+escA(withQuery('/date'))+'">All Dates</a>' : '<a onclick="buildYearView()">All Dates</a>';
 }
 
+// A year, month or day card shows a mosaic of the period's files (`samples`)
+// in a frame of routes.date.<level>.width x height. However few the files,
+// they fill the frame, so every card at a level is one size. The mosaic's
+// previews are not links: the whole card opens the period.
+function mosaicFrame(level){
+  return {w:settingIntInRange('routes.date.'+level+'.width'),
+          h:settingIntInRange('routes.date.'+level+'.height')};
+}
+// The files tiled like the Library's Tile view (the same justified layout),
+// fitted to the frame: the row height whose rows come closest to its height,
+// then every row stretched to the exact width and height. Boxes are percentages
+// of the frame, so a card narrower than the setting scales with it.
+function mosaicBoxes(samples,w,h){
+  var ratios=samples.map(tileRatio),best=null;
+  for(var t=16;t<=h;t+=4){
+    var geo=justifiedLayout(ratios,{containerWidth:w,containerPadding:0,
+      boxSpacing:0,targetRowHeight:t});
+    if(!best||Math.abs(geo.containerHeight-h)<Math.abs(best.containerHeight-h))best=geo;
+  }
+  var rows={},tops=[];
+  best.boxes.forEach(function(b,i){
+    if(!rows[b.top]){ rows[b.top]=[]; tops.push(b.top); }
+    rows[b.top].push(i);
+  });
+  var used=tops.reduce(function(s,t){ return s+best.boxes[rows[t][0]].height; },0);
+  var out=[],y=0;
+  tops.forEach(function(t){
+    var idx=rows[t],rowH=best.boxes[idx[0]].height/used*100;
+    var rowW=idx.reduce(function(s,i){ return s+best.boxes[i].width; },0),x=0;
+    idx.forEach(function(i){
+      var bw=best.boxes[i].width/rowW*100;
+      out[i]={left:x,top:y,width:bw,height:rowH};
+      x+=bw;
+    });
+    y+=rowH;
+  });
+  return out;
+}
+function dateMosaic(samples){
+  var boxes=mosaicBoxes(samples,dateFrame.w,dateFrame.h);
+  return '<div class="date-mosaic">'+samples.map(function(f,i){
+    var b=boxes[i];
+    return '<div class="date-tile" style="left:'+b.left+'%;top:'+b.top+'%;'+
+      'width:'+b.width+'%;height:'+b.height+'%">'+buildPreview(f)+'</div>';
+  }).join('')+'</div>';
+}
+var dateFrame=null;
+// `target` is the grid the cards go into: #dateGrid, or #dateNarrowing above
+// a live period's files.
+function useDateFrame(level,target){
+  var grid=target||document.getElementById('dateGrid');
+  dateFrame=level?mosaicFrame(level):null;
+  grid.classList.toggle('date-mosaics',!!dateFrame);
+  if(dateFrame){
+    grid.style.setProperty('--date-frame-w',dateFrame.w+'px');
+    grid.style.setProperty('--date-frame-w-n',dateFrame.w);
+    grid.style.setProperty('--date-frame-h-n',dateFrame.h);
+  }
+}
 function dateCards(buckets,actionFor){
   return buckets.map(function(b){
     var action=actionFor(b.key);
+    var preview=dateFrame&&b.samples&&b.samples.length
+      ? dateMosaic(b.samples)
+      : buildPreview(b.sample);
     return '<div class="date-card" data-key="'+escA(b.key)+'">'+
       dateCardAttrs(b.key,action)+
-      buildPreview(b.sample)+
+      preview+
       '<div class="date-card-label">'+escH(b.key)+'</div>'+
       '<div class="date-card-count">'+b.count+' files</div></div>';
   }).join('');
@@ -846,6 +908,12 @@ function fetchBuckets(level,parent,then,target){
     })
     .catch(function(){ grid.innerHTML='<p class="muted">Could not load dates.</p>'; });
 }
+// Up to n of the files, in random order.
+function pickRandom(files,n){
+  var a=files.slice();
+  for(var i=a.length-1;i>0;i--){ var j=Math.floor(Math.random()*(i+1)); var t=a[i]; a[i]=a[j]; a[j]=t; }
+  return a.slice(0,n);
+}
 // Groups inlined rows the old way, for a static export.
 function groupInlined(len,parent){
   var by={};
@@ -856,7 +924,9 @@ function groupInlined(len,parent){
     (by[k]=by[k]||[]).push(f);
   });
   return Object.keys(by).sort().reverse().map(function(k){
-    return {key:k,count:by[k].length,sample:by[k][0]};
+    var b={key:k,count:by[k].length,sample:by[k][0]};
+    b.samples=pickRandom(by[k],len===4?20:len===7?12:6);
+    return b;
   });
 }
 
@@ -878,6 +948,7 @@ function buildYearView(){
         '<p class="hint">Run <code>videre scan</code> in the library folder to index it, then reload this page.</p>');
       return;
     }
+    useDateFrame('year');
     document.getElementById('dateGrid').innerHTML=
       dateCards(b,function(k){return "buildMonthView('"+k+"')";});
   };
@@ -893,6 +964,7 @@ function buildMonthView(year){
   if(narrowing)narrowing.innerHTML='';
   var draw=function(b){
     showPeriodCount(b.reduce(function(s,x){return s+x.count;},0));
+    useDateFrame('month');
     document.getElementById('dateGrid').innerHTML=
       dateCards(b,function(k){return "buildDayView('"+k+"')";});
   };
@@ -910,6 +982,7 @@ function buildDayView(month){
   if(narrowing)narrowing.innerHTML='';
   var draw=function(b){
     showPeriodCount(b.reduce(function(s,x){return s+x.count;},0));
+    useDateFrame('day');
     document.getElementById('dateGrid').innerHTML=
       dateCards(b,function(k){return "buildDayGallery('"+k+"')";});
   };
@@ -943,6 +1016,7 @@ var dateParams=null,dateEmptyText='',dateTotal=0,dateRequest=0,dateLoading=false
 // Every date view starts here: a reply still in flight for the previous view is
 // dropped, and the button belongs to no view until a date's files load.
 function resetDatePaging(){
+  if(document.getElementById('dateGrid'))useDateFrame(null);
   dateRequest++;
   dateParams=null;
   dateFiles=null;
@@ -1020,6 +1094,7 @@ function renderDateNarrowing(prefix){
   if(prefix.length===7)level='day';
   if(!level)return;
   fetchBuckets(level,prefix,function(b){
+    useDateFrame(level,narrowing);
     narrowing.innerHTML=dateCards(b,function(k){
       return level==='month' ? "buildDayView('"+k+"')" : "buildDayGallery('"+k+"')";
     });

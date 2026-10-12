@@ -117,7 +117,7 @@ stays visible even when a file has none of the people or location data yet.
 | `/search?like=<hash>`, `/search?q=...` | A ranking as a page of its own: files like one, or matching words, within the query's filters. **Open as a page** on a Similar or text-results strip leads here, and a bookmark reopens it. **Show more** continues the ranking |
 | `/duplicates` | Duplicate groups by [kind](/commands/dedupe/#kinds), the same groups `dedupe review` writes, with **Trash copies** per group and **Trash all copies** in the toolbar |
 | `/people` | Face groups, and naming them. Singletons load as you scroll; naming one keeps your place |
-| `/date` | A Year / Month / Day drill-down |
+| `/date` | A Year / Month / Day drill-down. A year card shows up to 20 of its files, a month card up to 12 and a day card up to 6, tiled to fill a frame of one size per level; the pick changes each day |
 | `/date/2024`, `/date/2024/09`, `/date/2024/09/26` | The media of that year, month, or day, each with its item count; **Show more** loads the next page |
 | `/map` | Location clusters plotted on a world map, with the full file grid below; click a cluster to see its photos |
 | `/map/location/berlin?radius=25` | An addressable location drill-down with a proximity radius in kilometers |
@@ -186,7 +186,9 @@ In the box, each filter is a **chip**, and words stay as text:
   category, and what a file has or is missing), filled with this library's
   values and their counts. Choosing a value writes the same chip typing it
   would, choosing it again takes it out, and **Apply** runs the query.
-  `rating:4` means four stars or more.
+  `rating:4` means four stars or more. The Map leaves out the places column
+  and the Date page the date range, since each page already is one; typing
+  `place:` or `after:` there still works.
 - The **×** at the end of the box clears every chip and the words at once.
 
 The tall library header (the database path and the scanned-file counts) shows on
@@ -354,7 +356,12 @@ These are the defaults every library starts from:
       "sort": { "field": "date", "dir": "desc" },
       "tile": { "rowHeight": 280, "colGap": 10, "rowGap": 10 }
     },
-    "date": { "pageSize": 200 },
+    "date": {
+      "pageSize": 200,
+      "year": { "width": 300, "height": 200 },
+      "month": { "width": 220, "height": 150 },
+      "day": { "width": 160, "height": 110 }
+    },
     "search": { "pageSize": 96 },
     "events": { "sort": { "field": "date", "dir": "desc" } },
     "people": { "align": "right", "reclusterOpen": false, "pageSize": 200 },
@@ -371,6 +378,9 @@ These are the defaults every library starts from:
 | `routes.files.view` | `tile`, `list` | The file view on the Library, Date, Events and Map grids |
 | `routes.files.pageSize` | a whole number, 1 to 500 | How many files the Library and Map grids load at a time, and with each **Show more** |
 | `routes.date.pageSize` | a whole number, 1 to 500 | The same for a day, month or range in the Date view |
+| `routes.date.year.width`, `routes.date.year.height` | whole numbers of pixels, 120 to 1200 wide and 80 to 1200 high | The frame of each year card's pictures in the Date view |
+| `routes.date.month.width`, `routes.date.month.height` | the same | The frame of each month card's pictures |
+| `routes.date.day.width`, `routes.date.day.height` | the same | The frame of each day card's pictures |
 | `routes.search.pageSize` | a whole number, 1 to 200 | How many results a search page shows at a time, and with each **Show more** |
 | `routes.people.pageSize` | a whole number, 1 to 1000 | How many faces the People page's singletons and a person's page load at a time, as you scroll |
 | `routes.duplicates.pageSize` | a whole number, 1 to 1000 | How many duplicate groups the Duplicates page shows at a time, and with each **Show more** |

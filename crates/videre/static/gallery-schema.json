@@ -10,6 +10,12 @@
   "routes.files.tile.rowGap": { "section": "library", "label": "Row gap", "type": "int", "min": 0, "max": 100, "unit": "px" },
 
   "routes.date.pageSize": { "section": "date", "label": "Page size", "hint": "Files loaded at a time", "type": "int", "min": 1, "max": 500 },
+  "routes.date.year.width": { "section": "date", "label": "Year card width", "hint": "The frame of a year's pictures", "type": "int", "min": 120, "max": 1200, "unit": "px", "control": "slider", "step": 10 },
+  "routes.date.year.height": { "section": "date", "label": "Year card height", "type": "int", "min": 80, "max": 1200, "unit": "px", "control": "slider", "step": 10 },
+  "routes.date.month.width": { "section": "date", "label": "Month card width", "hint": "The frame of a month's pictures", "type": "int", "min": 120, "max": 1200, "unit": "px", "control": "slider", "step": 10 },
+  "routes.date.month.height": { "section": "date", "label": "Month card height", "type": "int", "min": 80, "max": 1200, "unit": "px", "control": "slider", "step": 10 },
+  "routes.date.day.width": { "section": "date", "label": "Day card width", "hint": "The frame of a day's pictures", "type": "int", "min": 120, "max": 1200, "unit": "px", "control": "slider", "step": 10 },
+  "routes.date.day.height": { "section": "date", "label": "Day card height", "type": "int", "min": 80, "max": 1200, "unit": "px", "control": "slider", "step": 10 },
 
   "routes.search.pageSize": { "section": "search", "label": "Page size", "hint": "Results loaded at a time", "type": "int", "min": 1, "max": 200 },
 

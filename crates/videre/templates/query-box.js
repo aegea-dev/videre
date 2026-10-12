@@ -420,7 +420,14 @@
     {title:'Type',keys:['type','ext']},
     {title:'Category',keys:['category']},
     {title:'Has',keys:['has','missing']}
-  ];
+  ].filter(function(col){
+    // The map is already a place, the Date page already a date. Typing
+    // place: or after: there still works.
+    var path=location.pathname;
+    if(col.title==='Place')return !/^\/map(\/|$)/.test(path);
+    if(col.date)return !/^\/date(\/|$)/.test(path);
+    return true;
+  });
 
   function chipValue(key){
     var c=chips.find(function(c){return !c.text&&!c.neg&&c.key===key;});
