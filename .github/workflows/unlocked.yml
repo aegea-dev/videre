@@ -1,0 +1,54 @@
+name: Unlocked build
+
+# Builds videre the way `cargo install videre` does: without Cargo.lock, so
+# every dependency resolves to the newest version its requirement allows.
+# Everything else here builds from the lock, which is how a dependency's new
+# release once stopped `cargo install` compiling every published videre while
+# CI, the release build and `cargo publish --dry-run` all stayed green. Direct
+# dependencies are pinned exactly; this catches a break in the dependencies
+# of our dependencies, which no pin reaches. Those release at any time, so it
+# also runs daily, not only when this repository changes.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "0 5 * * *" # daily 05:00 UTC
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: cargo check without Cargo.lock (${{ matrix.os }})
+    # Platform-specific dependencies differ (Metal on macOS), so both resolve.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The version comes from rust-toolchain.toml, the one place it is written.
+      - name: Install the pinned toolchain
+        run: |
+          rustup toolchain install --profile minimal \
+            "$(sed -n 's/^channel *= *"\(.*\)"/\1/p' rust-toolchain.toml)"
+
+      # No dependency cache: its key is Cargo.lock, which this job deletes.
+      # `check` type-checks without code generation, which is enough to catch
+      # an API change; the binary alone, since that is what cargo install
+      # builds (no tests, no dev-dependencies).
+      - name: Resolve fresh and check the binary
+        run: |
+          rm Cargo.lock
+          cargo check -p videre --bin videre

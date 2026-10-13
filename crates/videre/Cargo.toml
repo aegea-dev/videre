@@ -22,16 +22,16 @@ name = "videre"
 path = "src/main.rs"
 
 [dependencies]
-clap = { version = "=4.6.6", features = ["derive"] }
-clap_complete = { version = "=4.6.11", features = ["unstable-dynamic"] }
-libc = "=0.2.189"
-blake3 = "=1.8.7"
-rayon = "=1.12.0"
-walkdir = "=2.5.0"
-serde = { version = "=1.0.229", features = ["derive"] }
-serde_json = "=1.0.151"
-chrono = { version = "=0.4.45", features = ["serde"] }
-image = { version = "=0.25.10", default-features = false, features = [
+clap = { version = "~4.6.6", features = ["derive"] }
+clap_complete = { version = "~4.6.11", features = ["unstable-dynamic"] }
+libc = "~0.2.189"
+blake3 = "~1.8.7"
+rayon = "~1.12.0"
+walkdir = "~2.5.0"
+serde = { version = "~1.0.229", features = ["derive"] }
+serde_json = "~1.0.151"
+chrono = { version = "~0.4.45", features = ["serde"] }
+image = { version = "~0.25.10", default-features = false, features = [
     "jpeg",
     "png",
     "gif",
@@ -39,56 +39,56 @@ image = { version = "=0.25.10", default-features = false, features = [
     "bmp",
     "tiff",
 ] }
-kamadak-exif = "=0.6.1"
-roxmltree = "=0.21.1"
-filetime = "=0.2.29"
-trash = "=5.2.9"
-rusqlite = { version = "=0.40.2", features = ["bundled"] }
+kamadak-exif = "~0.6.1"
+roxmltree = "~0.21.1"
+filetime = "~0.2.29"
+trash = "~5.2.9"
+rusqlite = { version = "~0.40.2", features = ["bundled"] }
 videre-core = { path = "../videre-core", version = "=0.63.2" }
 videre-ml = { path = "../videre-ml", version = "=0.63.2" }
 videre-api = { path = "../videre-api", version = "=0.63.2" }
-axum = "=0.8.9"
-tokio = { version = "=1.53.1", features = ["full"] }
-tower-http = { version = "=0.7.1", features = ["fs"] }
-anyhow = "=1.0.104"
-toml = { version = "=1.1.6+spec-1.1.0", features = ["preserve_order"] }
-rmcp = { version = "=3.5.0", features = ["transport-io"] }
-schemars = "=1.2.2"
-askama = "=0.16.0"
-notify = "=8.2.0"
-notify-debouncer-full = "=0.7.0"
-little_exif = "=0.6.23"
-crc32fast = "=1.5.1"
-tracing = "=0.1.44"
-tracing-subscriber = { version = "=0.3.23", features = ["fmt", "json", "registry"] }
-tracing-logfmt = "=0.3.7"
-file-rotate = "=0.8.0"
+axum = "~0.8.9"
+tokio = { version = "~1.53.1", features = ["full"] }
+tower-http = { version = "~0.7.1", features = ["fs"] }
+anyhow = "~1.0.104"
+toml = { version = "~1.1.6", features = ["preserve_order"] }
+rmcp = { version = "~3.5.0", features = ["transport-io"] }
+schemars = "~1.2.2"
+askama = "~0.16.0"
+notify = "~8.2.0"
+notify-debouncer-full = "~0.7.0"
+little_exif = "~0.6.23"
+crc32fast = "~1.5.1"
+tracing = "~0.1.44"
+tracing-subscriber = { version = "~0.3.23", features = ["fmt", "json", "registry"] }
+tracing-logfmt = "~0.3.7"
+file-rotate = "~0.8.0"
 # Parses the Lucene-style query language (`query_lang`) into a syntax tree;
 # no tantivy index. Only the binary crate queries, so it stays out of core.
-tantivy-query-grammar = "=0.26.0"
+tantivy-query-grammar = "~0.26.0"
 
 [dev-dependencies]
-tempfile = "=3.27.0"
-tower = { version = "=0.5.3", features = ["util"] }
+tempfile = "~3.27.0"
+tower = { version = "~0.5.3", features = ["util"] }
 # Cross-process lock serialising tests that download shared model weights;
 # see tests/common/mod.rs. Same version videre-core uses.
-fs2 = "=0.4.3"
-rusqlite = { version = "=0.40.2", features = ["bundled"] }
-serde_json = "=1.0.151"
+fs2 = "~0.4.3"
+rusqlite = { version = "~0.40.2", features = ["bundled"] }
+serde_json = "~1.0.151"
 # Encodes the feature fixture's deterministic f16 model vectors; same version
 # videre-core uses. See tests/common/feature_fixture.rs.
-half = "=2.7.1"
+half = "~2.7.1"
 videre-core = { path = "../videre-core", version = "=0.63.2" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-candle-core = { version = "=0.11.0", features = ["metal"] }
+candle-core = { version = "~0.11.0", features = ["metal"] }
 # NSFileManager's trash, for the path a trashed file lands at (removal.rs).
 # The same versions the trash crate already pulls in.
-objc2 = "=0.6.4"
-objc2-foundation = { version = "=0.3.2", default-features = false, features = ["std", "NSError", "NSFileManager", "NSString", "NSURL"] }
+objc2 = "~0.6.4"
+objc2-foundation = { version = "~0.3.2", default-features = false, features = ["std", "NSError", "NSFileManager", "NSString", "NSURL"] }
 
 [target.'cfg(not(target_os = "macos"))'.dependencies]
-candle-core = "=0.11.0"
+candle-core = "~0.11.0"
 
 [lints]
 workspace = true
