@@ -38,27 +38,24 @@ pub fn run(args: ConfigArgs, ctx: &CommandContext) -> Result<()> {
         None => show(ctx),
         Some(ConfigAction::Set { key, value }) => {
             let (key, value) = config_value(&key, value)?;
-            let off = key == ConfigKey::StreetDetail && value == toml::Value::Boolean(false);
             library_config::edit(&ctx.library, key, Some(value))?;
-            if off {
-                forget_street_detail(ctx)?;
-            }
-            Ok(())
+            forget_street_detail_if_off(ctx, key)
         }
         Some(ConfigAction::Unset { key }) => {
             let key = config_key(&key);
             library_config::edit(&ctx.library, key, None)?;
-            if key == ConfigKey::StreetDetail {
-                forget_street_detail(ctx)?;
-            }
-            Ok(())
+            forget_street_detail_if_off(ctx, key)
         }
     }
 }
 
 /// Street detail off means no street map on disk: the download was the
-/// consent's only product, so withdrawing the consent deletes it.
-fn forget_street_detail(ctx: &CommandContext) -> Result<()> {
+/// consent's only product, so withdrawing the consent deletes it. Decided
+/// from the setting as saved, so an unset (the default, on) keeps the map.
+fn forget_street_detail_if_off(ctx: &CommandContext, key: ConfigKey) -> Result<()> {
+    if key != ConfigKey::StreetDetail || library_config::load(&ctx.library.paths)?.street_detail {
+        return Ok(());
+    }
     if let Some(bytes) = videre_core::basemap_detail::remove(&ctx.library.paths.state)? {
         eprintln!(
             "street-detail off: deleted the downloaded street map ({:.0} MB)",

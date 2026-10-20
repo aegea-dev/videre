@@ -268,7 +268,7 @@ mod street_detail_tests {
         (status, serde_json::from_slice(&body).unwrap_or_default())
     }
 
-    /// A library with one Berlin place and, when `on`, street_detail set.
+    /// A library with one Berlin place and street_detail set to `on`.
     fn library(dir: &Path, on: bool) -> Arc<AppState> {
         let state = gallery_state(dir);
         {
@@ -281,12 +281,10 @@ mod street_detail_tests {
             )
             .unwrap();
         }
-        if on {
-            let paths = &state.context.library.paths;
-            std::fs::create_dir_all(&paths.state).unwrap();
-            std::fs::write(&paths.config, "street_detail = true\n").unwrap();
-            refresh_street_detail(&state);
-        }
+        let paths = &state.context.library.paths;
+        std::fs::create_dir_all(&paths.state).unwrap();
+        std::fs::write(&paths.config, format!("street_detail = {on}\n")).unwrap();
+        refresh_street_detail(&state);
         state
     }
 
@@ -336,7 +334,7 @@ mod street_detail_tests {
         // config again.
         std::fs::write(&paths.config, "street_detail = true\n").unwrap();
         assert!(render().await.contains("var STREET_DETAIL=true;"));
-        std::fs::remove_file(&paths.config).unwrap();
+        std::fs::write(&paths.config, "street_detail = false\n").unwrap();
         let app = app(state.clone());
         let (_, v) = call(&app, "GET", "/api/basemap/detail").await;
         assert_eq!(v["enabled"], true, "remembered from the page, not re-read");

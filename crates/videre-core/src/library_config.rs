@@ -198,7 +198,7 @@ impl Default for LibraryConfig {
             search_min_match: SEARCH_MIN_MATCH_DEFAULT,
             similar_min_score: None,
             run_history: RUN_HISTORY_DEFAULT,
-            street_detail: false,
+            street_detail: true,
         }
     }
 }
@@ -779,7 +779,7 @@ fn config_from_table(table: &toml::Table, file: &Path) -> Result<LibraryConfig> 
         xmp_precedence,
         export_xmp_on_watch: bool_setting(table, file, "export_xmp_on_watch", false)?,
         gallery_starts_watch: bool_setting(table, file, "gallery_starts_watch", true)?,
-        street_detail: bool_setting(table, file, "street_detail", false)?,
+        street_detail: bool_setting(table, file, "street_detail", true)?,
         min_read_rate_mb_s: read_rate_setting(table, file)?,
         max_io_workers: io_workers_setting(table, file)?,
         watch_debounce_ms: debounce_setting(table, file)?,
@@ -1526,23 +1526,24 @@ mod tests {
     }
 
     #[test]
-    fn street_detail_is_off_unless_opted_into() {
+    fn street_detail_is_on_unless_opted_out_of() {
         let (_t, ctx) = library_with_config("");
-        assert!(!load(&ctx.paths).unwrap().street_detail);
+        assert!(load(&ctx.paths).unwrap().street_detail);
+        assert!(LibraryConfig::default().street_detail);
         edit(
             &ctx,
             ConfigKey::StreetDetail,
-            Some(toml::Value::Boolean(true)),
+            Some(toml::Value::Boolean(false)),
         )
         .unwrap();
-        assert!(load(&ctx.paths).unwrap().street_detail);
+        assert!(!load(&ctx.paths).unwrap().street_detail);
         let err = edit(&ctx, ConfigKey::StreetDetail, Some(toml::Value::Integer(1))).unwrap_err();
         assert!(
             format!("{err:#}").contains("street_detail must be a boolean"),
             "{err:#}"
         );
         edit(&ctx, ConfigKey::StreetDetail, None).unwrap();
-        assert!(!load(&ctx.paths).unwrap().street_detail);
+        assert!(load(&ctx.paths).unwrap().street_detail);
     }
 
     #[test]
