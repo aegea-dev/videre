@@ -1,5 +1,5 @@
 # Documentation for videre, a local-first photo and video library CLI.
-# https://github.com/erhangundogan/videre
+# https://github.com/aegea-dev/videre
 
 User-agent: *
 Allow: /

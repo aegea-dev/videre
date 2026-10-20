@@ -96,10 +96,10 @@ review to a model with no server to set up.
 On macOS or Linux with Homebrew:
 
 ```bash
-brew install erhangundogan/tap/videre
+brew install aegea-dev/tap/videre
 ```
 
-Or download a binary from the [latest release](https://github.com/erhangundogan/videre/releases/latest)
+Or download a binary from the [latest release](https://github.com/aegea-dev/videre/releases/latest)
 and put it on your `PATH`. No Rust toolchain needed, nothing to compile.
 
 Or build it yourself, which needs Rust:
