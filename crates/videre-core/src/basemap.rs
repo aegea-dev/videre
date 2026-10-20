@@ -7,11 +7,13 @@ use anyhow::Context;
 use std::io::{Read, Seek, Write};
 use std::path::{Path, PathBuf};
 
-/// The pinned basemap build: a world vector archive, zooms 0 through 8,
-/// extracted once from a dated Protomaps build (the documented command is
-/// `pmtiles extract <build-url> world-z0-8.pmtiles --maxzoom=8`) and
-/// attached as a release asset on this repository. Built by release
-/// engineering, not at runtime.
+/// The pinned basemap build: a world vector archive, zooms 0 through 6
+/// (44 MB; zoom 8 would be 543 MB), extracted once from a Protomaps v4
+/// build with `pmtiles extract <build-url> world-z0-8.pmtiles --maxzoom=6`
+/// and attached as a release asset on this repository. The asset keeps its
+/// `z0-8` name because released versions request it by that name. Street
+/// detail (`basemap_detail`) takes over from zoom 9, so MapLibre stretches
+/// zoom 6 over 7 and 8. Built by release engineering, not at runtime.
 pub const BASEMAP_URL: &str =
     "https://github.com/erhangundogan/videre/releases/download/basemap-v1/world-z0-8.pmtiles";
 
