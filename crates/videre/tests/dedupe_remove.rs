@@ -353,12 +353,16 @@ fn an_edit_whose_original_is_gone_from_disk_is_kept() {
 /// `A.jpg` has the same content as `B-edited.jpg`, and the edit is the older
 /// copy, so exact dedupe alone would keep the edit and remove `A.jpg`. The
 /// edit goes as an edit, so `A.jpg` must be the copy that survives.
+///
+/// The pair is a fixture with no EXIF date, so the mtimes below decide which
+/// copy is older. With `sample_with_exif.jpg` both copies had the same EXIF
+/// date, the tie went to scan order, and the test failed on some Linux runs.
 #[test]
 fn an_edit_kept_by_exact_dedupe_does_not_take_its_copy_with_it() {
     let lib = TestLibrary::new();
     lib.copy_fixture("tiny.jpg", "Photos/B.jpg");
-    let edit = lib.copy_fixture("sample_with_exif.jpg", "Photos/B-edited.jpg");
-    let copy = lib.copy_fixture("sample_with_exif.jpg", "Album/A.jpg");
+    let edit = lib.copy_fixture("ai-generated-couple.jpg", "Photos/B-edited.jpg");
+    let copy = lib.copy_fixture("ai-generated-couple.jpg", "Album/A.jpg");
     filetime::set_file_mtime(&edit, filetime::FileTime::from_unix_time(1_000_000_000, 0)).unwrap();
     filetime::set_file_mtime(&copy, filetime::FileTime::from_unix_time(1_600_000_000, 0)).unwrap();
     lib.scan();
