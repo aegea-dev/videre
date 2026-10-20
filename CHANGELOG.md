@@ -16,6 +16,46 @@ version number and are released together.
 ## [Unreleased]
 
 
+## [0.64.0] - 2026-10-20
+
+### Fixed
+
+- **The Map view draws its world map on every machine.** Since 0.35.0 the
+  map has downloaded its world basemap on first use from a file that was
+  never published, so outside the developer's own machine it showed no land,
+  sea or borders. The file is now published (zooms 0 to 6, 44 MB,
+  OpenStreetMap data of March 2026), which fixes the map for earlier
+  versions too; this version also colours forests and grassland from it.
+- The Duplicates page's Sort menu showed "Wasted space" while the groups
+  were never sorted by it. It now starts on "Please select" until you choose.
+
+### Changed
+
+- **Street detail is on by default.** The map shows the **Street detail**
+  button in every library. Nothing is downloaded until you click it and
+  confirm the size, and that download tells the host roughly where your
+  photos were taken, as before. `videre config set street-detail false`
+  hides the button and deletes a downloaded street map; `videre config unset
+  street-detail` now returns to the default, on, and keeps it.
+- **videre moved to the aegea-dev organisation:** the repository is
+  <https://github.com/aegea-dev/videre> and Homebrew installs with
+  `brew install aegea-dev/tap/videre`. The old addresses redirect for now.
+- `rustls` 0.23.46, fixing four security advisories in the TLS library used
+  to download models.
+
+### Upgrading
+
+- **Homebrew users of the old tap:** move to the new one with
+  `brew uninstall videre`, `brew untap erhangundogan/tap`, then
+  `brew install aegea-dev/tap/videre`.
+- **Libraries that never set `street-detail`** now show the Street detail
+  button; to keep it hidden, run `videre config set street-detail false`.
+- **For crates depending on `videre`, `videre-core`, `videre-api` or
+  `videre-ml`:** their dependencies take patch releases (`~x.y.z`) rather
+  than exact versions, so a project sharing a dependency with them no longer
+  needs the very same version of it. Their requirements on each other stay
+  exact.
+
 ## [0.63.2] - 2026-10-12
 
 ### Fixed
@@ -3437,7 +3477,8 @@ takes the model id explicitly instead of reading it from the environment.
   skip it rather than failing.
 - First release published to crates.io.
 
-[Unreleased]: https://github.com/aegea-dev/videre/compare/v0.63.2...HEAD
+[Unreleased]: https://github.com/aegea-dev/videre/compare/v0.64.0...HEAD
+[0.64.0]: https://github.com/aegea-dev/videre/compare/v0.63.2...v0.64.0
 [0.63.2]: https://github.com/aegea-dev/videre/compare/v0.63.1...v0.63.2
 [0.63.1]: https://github.com/aegea-dev/videre/compare/v0.63.0...v0.63.1
 [0.63.0]: https://github.com/aegea-dev/videre/compare/v0.62.0...v0.63.0
