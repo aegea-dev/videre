@@ -9,4 +9,12 @@ ignore = [
     # updates, or if videre ever writes PNG metadata through it.
     "RUSTSEC-2026-0194",
     "RUSTSEC-2026-0195",
+    # zip 8.6 via candle-core 0.11, which requires ^8.6 (the fix is 9.0). All
+    # three are about `extract()` writing permissions and symlinks to disk.
+    # candle opens zip only to read `.npz` arrays and never extracts; videre
+    # loads safetensors and never reads `.npz`. Drop these once candle moves
+    # to zip 9.
+    "RUSTSEC-2026-0367",
+    "RUSTSEC-2026-0368",
+    "RUSTSEC-2026-0369",
 ]
