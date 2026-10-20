@@ -2,7 +2,7 @@
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 
-const REPO = 'https://github.com/erhangundogan/videre';
+const REPO = 'https://github.com/aegea-dev/videre';
 const SITE = 'https://docs.videre.sh';
 
 // https://astro.build/config

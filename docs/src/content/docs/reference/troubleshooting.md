@@ -160,5 +160,5 @@ The released binaries already carry it, so the
 - [Where your data lives](/reference/paths/) explains how a database is
   resolved, which answers most "it is not using the library I expected".
 - Report a problem at
-  [github.com/erhangundogan/videre/issues](https://github.com/erhangundogan/videre/issues).
+  [github.com/aegea-dev/videre/issues](https://github.com/aegea-dev/videre/issues).
   Include `videre --version` and the exact command.

@@ -14,7 +14,7 @@ curl -fsSL https://videre.sh/install | sh
 ```
 
 No Rust toolchain, nothing to compile. On macOS, `brew install
-erhangundogan/tap/videre` works too and handles upgrades for you. Both are
+aegea-dev/tap/videre` works too and handles upgrades for you. Both are
 covered in [install](/start/install/), along with building from source and the
 platform notes.
 

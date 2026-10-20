@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 /// detail (`basemap_detail`) takes over from zoom 9, so MapLibre stretches
 /// zoom 6 over 7 and 8. Built by release engineering, not at runtime.
 pub const BASEMAP_URL: &str =
-    "https://github.com/erhangundogan/videre/releases/download/basemap-v1/world-z0-8.pmtiles";
+    "https://github.com/aegea-dev/videre/releases/download/basemap-v1/world-z0-8.pmtiles";
 
 /// The archive path for one library: the per-library override when it
 /// exists (how tests and a future config seed a basemap without the

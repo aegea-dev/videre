@@ -88,12 +88,12 @@ installed.
 **The best option on macOS**, because it handles upgrades:
 
 ```bash
-brew install erhangundogan/tap/videre
+brew install aegea-dev/tap/videre
 ```
 
 ## Prebuilt binary
 
-Download from the [latest release](https://github.com/erhangundogan/videre/releases/latest)
+Download from the [latest release](https://github.com/aegea-dev/videre/releases/latest)
 and put it on your `PATH`. No Rust toolchain needed, nothing to compile.
 
 | Platform | File |
@@ -146,7 +146,7 @@ tested with. Without it, cargo picks the newest versions it is allowed, and a
 dependency's later release can stop videre from compiling.
 
 ```bash
-git clone git@github.com:erhangundogan/videre.git
+git clone git@github.com:aegea-dev/videre.git
 cd videre
 cargo build --release
 ```

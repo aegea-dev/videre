@@ -4,7 +4,7 @@ version = "0.63.2"
 edition = "2021"
 description = "Transport-agnostic facade over videre's face-labeling and image-serving operations"
 license = "Apache-2.0"
-repository = "https://github.com/erhangundogan/videre"
+repository = "https://github.com/aegea-dev/videre"
 keywords = ["faces", "labeling", "videre"]
 categories = ["multimedia::images"]
 

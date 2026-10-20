@@ -17,12 +17,12 @@ Screenshots and short screen recordings help a lot, so attach them if you can.
 
 If you have a GitHub account, you can also:
 
-- [open an issue](https://github.com/erhangundogan/videre/issues/new) for a bug
+- [open an issue](https://github.com/aegea-dev/videre/issues/new) for a bug
   or a feature request, where others can follow and add to it;
-- [send a pull request](https://github.com/erhangundogan/videre/pulls) if you
+- [send a pull request](https://github.com/aegea-dev/videre/pulls) if you
   would like to fix or improve something yourself. These pages live in the
   same repository, under
-  [`docs/`](https://github.com/erhangundogan/videre/tree/main/docs), so a
+  [`docs/`](https://github.com/aegea-dev/videre/tree/main/docs), so a
   correction to them is a pull request too.
 
 ## What helps in a bug report
