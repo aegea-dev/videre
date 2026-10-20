@@ -224,7 +224,7 @@ fn the_gallery_watch_setting_is_on_by_default_and_can_be_turned_off() {
 fn turning_street_detail_off_deletes_the_downloaded_street_map() {
     let library = TestLibrary::new();
     let shown = run(&library, &["config"]);
-    assert!(String::from_utf8_lossy(&shown.stdout).contains("street-detail: off"));
+    assert!(String::from_utf8_lossy(&shown.stdout).contains("street-detail: on"));
     assert!(run(&library, &["config", "set", "street-detail", "true"])
         .status
         .success());
@@ -245,12 +245,14 @@ fn turning_street_detail_off_deletes_the_downloaded_street_map() {
         "{off:?}"
     );
 
-    // Unset is off too.
+    // Unset is the default, on, so a map downloaded since stays.
     std::fs::write(dir.join("detail.pmtiles"), b"sokak").unwrap();
     assert!(run(&library, &["config", "unset", "street-detail"])
         .status
         .success());
-    assert!(!dir.join("detail.pmtiles").exists());
+    assert!(dir.join("detail.pmtiles").exists());
+    let shown = run(&library, &["config"]);
+    assert!(String::from_utf8_lossy(&shown.stdout).contains("street-detail: on"));
 }
 
 #[test]

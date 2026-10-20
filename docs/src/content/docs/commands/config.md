@@ -42,7 +42,7 @@ io-workers:    40 (default)
 xmp:           db
 export-xmp-on-watch: off
 gallery-starts-watch: on
-street-detail: off
+street-detail: on
 watch-debounce-ms: 1500 ms (default)
 watch-bulk-threshold: 1000 files (default)
 watch-bulk-quiet-ms: 30000 ms (default)
@@ -112,7 +112,7 @@ change at once. See [the settings pages](/commands/gallery/#settings).
 | `search-min-match` | `search_min_match` | A match probability from 0 to 1 (default 0, every match); [search](/commands/search/) drops weaker text matches. On short queries a floor can hide real matches |
 | `similar-min-score` | `similar_min_score` | A similarity from -1 to 1, or unset (the default) to keep every result of an image search or **Similar** |
 | `run-history` | `run_history` | A whole number from 1 through 100 (default 3): runs kept per command, the latest included |
-| `street-detail` | `street_detail` | `false` (default) or `true`; see [street detail](/commands/gallery/#street-detail). Turning it off deletes the downloaded street map |
+| `street-detail` | `street_detail` | `true` (default) or `false`; see [street detail](/commands/gallery/#street-detail). Turning it off deletes the downloaded street map |
 
 Storage cannot be redirected. `db` and `jsonl` are fixed declarations and
 must remain `hashes.db` and `hashes.jsonl`. The removed global `path` and `db`

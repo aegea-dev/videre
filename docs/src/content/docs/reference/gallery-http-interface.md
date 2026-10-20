@@ -686,7 +686,7 @@ curl "http://127.0.0.1:7878/api/location-clusters/7/points"
 
 ## Street detail
 
-Opt-in per library (`videre config set street-detail true`; see
+On by default; turned off per library (`videre config set street-detail false`; see
 [the gallery's map](/commands/gallery/#street-detail)). Off, the status is
 `{"enabled":false,"state":"off"}`, any street map left on disk is deleted, the
 two `POST` endpoints answer `403` and the tiles `404`.

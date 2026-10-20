@@ -389,14 +389,15 @@ test("zooming into a city splits it into districts, then street groups", async (
 // Sets street detail in the config file, as `videre config set street-detail`
 // would. The library is shared by a worker's tests, so the key is replaced,
 // never appended twice (a duplicate key makes the whole config unreadable),
-// and every street-detail test turns it off again afterwards.
+// and every street-detail test turns it off again afterwards. It is on by
+// default, so off is written out.
 function setStreetDetail(libraryRoot: string, on: boolean): void {
   const config = join(libraryRoot, ".videre", "config.toml");
   const kept = (existsSync(config) ? readFileSync(config, "utf8") : "")
     .split("\n")
     .filter((line) => !line.startsWith("street_detail"))
     .join("\n");
-  writeFileSync(config, kept.replace(/\n*$/, "\n") + (on ? "street_detail = true\n" : ""));
+  writeFileSync(config, kept.replace(/\n*$/, "\n") + `street_detail = ${on}\n`);
   if (!on) {
     for (const name of ["detail.pmtiles", "detail.json"]) {
       rmSync(join(libraryRoot, ".videre", "basemap", name), { force: true });
@@ -425,7 +426,8 @@ async function mapReady(page: import("@playwright/test").Page): Promise<boolean>
 test.describe("street detail", () => {
 test.afterEach(({ gallery }) => setStreetDetail(gallery.libraryRoot, false));
 
-test("street detail stays hidden until the library opts in, then is offered", async ({ page, gallery }) => {
+test("street detail stays hidden while the library turns it off, then is offered", async ({ page, gallery }) => {
+  setStreetDetail(gallery.libraryRoot, false);
   seedDistricts(gallery.libraryRoot);
   seedBasemap(gallery.libraryRoot);
   await preferListView(gallery);

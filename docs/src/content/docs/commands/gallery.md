@@ -246,21 +246,16 @@ self-drawn plot with the same clusters, drill-down, and grid.
 
 The world basemap stops at country level: land, water and borders, no roads.
 Street detail adds roads, buildings, parks, and street and district names
-around your own places, from zoom 9 down to single streets. It is **off by
-default**, because getting it tells a third party roughly where your photos
-were taken:
-
-```bash
-videre config set street-detail true
-```
-
-With it on, the map shows a **Street detail** button. Clicking it asks the size
+around your own places, from zoom 9 down to single streets. It is on by
+default, but nothing downloads until you ask: the map shows a **Street
+detail** button, and clicking it asks the size
 first and then, once you confirm, downloads the areas around your places from
 the OpenStreetMap map that Protomaps builds and
 [Source Cooperative](https://source.coop/protomaps/openstreetmap) hosts. What
 leaves your machine is which areas: whole 1° squares (about 111 × 70 km in
 central Europe) that contain your places, never a place's exact position, and
-nothing about the photos themselves. A library with 53 places across Europe and
+nothing about the photos themselves, but it does tell that third party roughly
+where your photos were taken. A library with 53 places across Europe and
 Asia needs around 1 GB; one city is around 50 MB. Street and place names use a
 font covering Latin scripts, so names in other scripts are not labelled.
 
@@ -272,7 +267,7 @@ outside the downloaded areas, the button offers **Update street detail**.
 videre config set street-detail false
 ```
 
-turns it off and deletes the downloaded map.
+hides the button, and deletes the downloaded map if there is one.
 
 The Events view finds travel trips, not ordinary local outings. It
 infers home from the place with the most assignable media in your library, then

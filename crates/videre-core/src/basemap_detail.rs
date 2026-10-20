@@ -2,9 +2,10 @@
 //! names at zooms 9 to 14, cut once from the public Protomaps planet build
 //! that Source Cooperative hosts, and served offline afterwards.
 //!
-//! :warning: **Opt-in, because the cut leaves the machine.** Asking for the
-//! tiles around a library's places tells the host roughly where its photos
-//! were taken. Off unless `street_detail` is set, and even then the areas
+//! :warning: **Downloaded only on request, because the cut leaves the
+//! machine.** Asking for the tiles around a library's places tells the host
+//! roughly where its photos were taken. `street_detail` (on by default) only
+//! offers the download; the user starts it, and even then the areas
 //! asked for are whole 1-degree cells (about 111 x 70 km at Berlin's
 //! latitude), never a place's own box. Turning the setting off deletes the
 //! archive ([`remove`]), so the setting and the disk always agree.
