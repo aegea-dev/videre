@@ -65,3 +65,16 @@ test("Trash copies moves one group's copies and keeps its first file", async ({
   );
   expect(left.filter(Boolean)).toHaveLength(1);
 });
+
+test("the Duplicates sort starts unchosen, greyed like the filter's placeholder", async ({
+  page,
+  gallery
+}) => {
+  await page.goto(`${gallery.baseURL}/duplicates`);
+  const sort = page.locator("#sort-select");
+  await expect(sort).toHaveValue("");
+  await expect(sort.locator("option:checked")).toHaveText("Please select");
+  await expect(sort).toHaveCSS("color", "rgb(113, 113, 122)");
+  await sort.selectOption("waste");
+  await expect(sort).not.toHaveCSS("color", "rgb(113, 113, 122)");
+});
