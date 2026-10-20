@@ -66,7 +66,7 @@ pub fn forward_geocode_network(query: &str) -> Result<(f64, f64)> {
     let user_agent = concat!(
         "videre/",
         env!("CARGO_PKG_VERSION"),
-        " (https://github.com/erhangundogan/videre)"
+        " (https://github.com/aegea-dev/videre)"
     );
 
     let results: Vec<NominatimResult> = ureq::get("https://nominatim.openstreetmap.org/search")

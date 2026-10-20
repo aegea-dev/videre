@@ -14,7 +14,7 @@
 
 set -eu
 
-REPO="erhangundogan/videre"
+REPO="aegea-dev/videre"
 
 # Overridable only so the test suite can serve a deliberately corrupted archive
 # and prove the checksum check actually fires. A security check that has never

@@ -1,7 +1,7 @@
 ## Install
 
 ```bash
-brew install erhangundogan/tap/videre
+brew install aegea-dev/tap/videre
 ```
 
 Or download an archive below and put `videre` on your `PATH`. No Rust toolchain, nothing to compile.
@@ -18,4 +18,4 @@ Model weights download on first use, not at install: ~1.5 GB for semantic search
 
 Intel Macs are not supported: ONNX Runtime ships no prebuilt binaries for `x86_64-apple-darwin`.
 
-See [CHANGELOG.md](https://github.com/erhangundogan/videre/blob/main/CHANGELOG.md) for what changed.
+See [CHANGELOG.md](https://github.com/aegea-dev/videre/blob/main/CHANGELOG.md) for what changed.

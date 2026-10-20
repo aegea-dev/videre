@@ -274,7 +274,7 @@ jobs:
           lnx_x64=$(sha x86_64-unknown-linux-gnu)
           lnx_arm=$(sha aarch64-unknown-linux-gnu)
 
-          git clone "https://x-access-token:${TAP_TOKEN}@github.com/erhangundogan/homebrew-tap.git" /tmp/tap
+          git clone "https://x-access-token:${TAP_TOKEN}@github.com/aegea-dev/homebrew-tap.git" /tmp/tap
           cd /tmp/tap
           python3 - "$version" "$mac_arm" "$lnx_x64" "$lnx_arm" <<'PY'
           import re, sys, pathlib
