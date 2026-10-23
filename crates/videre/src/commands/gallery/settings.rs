@@ -341,7 +341,7 @@ const RESUME_MAX: usize = 2048;
 
 /// Paths that are not pages. `/settings`, `/diagnostics` and their tabs are
 /// refused separately: each is a detour, not a place to come back to.
-const NOT_RESUMABLE: &[&str] = &["/api/", "/tiles/", "/vendor/"];
+const NOT_RESUMABLE: &[&str] = &["/api/", "/tiles/", "/vendor/", "/favicon."];
 
 /// The effective settings the server works from, read when a page renders
 /// or the settings are saved, never on every request. A hand edit applies on

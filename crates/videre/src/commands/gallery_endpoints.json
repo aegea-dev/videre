@@ -36,6 +36,8 @@
     { "method": "GET",    "path": "/api/diagnostics/stats" },
     { "method": "GET",    "path": "/api/diagnostics/logs" },
     { "method": "GET",    "path": "/vendor/{version}/{asset}" },
+    { "method": "GET",    "path": "/favicon.svg" },
+    { "method": "GET",    "path": "/favicon.ico" },
     { "method": "GET",    "path": "/api/people" },
     { "method": "POST",   "path": "/api/people" },
     { "method": "GET",    "path": "/api/people/{name}" },
