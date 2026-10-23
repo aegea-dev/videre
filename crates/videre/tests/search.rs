@@ -367,7 +367,11 @@ fn text_search_errors_with_run_embed_first_when_no_embeddings_exist() {
     assert!(!out.status.success());
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("no embeddings"), "{stderr}");
-    assert!(stderr.contains("videre embed --model"), "{stderr}");
+    assert!(stderr.contains("\n  run: videre embed\n"), "{stderr}");
+    assert!(
+        stderr.contains("run (all features): videre pipeline"),
+        "{stderr}"
+    );
 
     let json_out = lib
         .cmd()
@@ -379,7 +383,8 @@ fn text_search_errors_with_run_embed_first_when_no_embeddings_exist() {
         .expect("stdout must be one valid JSON error object");
     let msg = doc["error"]["message"].as_str().unwrap_or_default();
     assert!(msg.contains("no embeddings"), "{doc}");
-    assert!(msg.contains("videre embed --model"), "{doc}");
+    assert!(msg.contains("\n  run: videre embed\n"), "{doc}");
+    assert!(msg.contains("run (all features): videre pipeline"), "{doc}");
 }
 
 #[test]
