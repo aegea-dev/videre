@@ -978,9 +978,9 @@ fn the_api_the_labeling_ui_depends_on_answers_json() {
 /// This is also the mechanism that would let `Server::start` above drop its
 /// mutex: with a trustworthy announced port there is no free-port race to
 /// serialise.
-/// The missing-embeddings note follows a colon, not parentheses: the hint
-/// runs over several lines, and a `)` after its last command read as part of
-/// `videre pipeline`.
+/// The missing-embeddings note keeps only its first line in parentheses and
+/// writes the rest of the hint below: wrapping all of it put a `)` after the
+/// last command, where it read as part of `videre pipeline`.
 #[test]
 fn the_no_embeddings_note_ends_with_the_pipeline_command() {
     let lib = fixture();
@@ -1009,7 +1009,9 @@ fn the_no_embeddings_note_ends_with_the_pipeline_command() {
     }
     let text = before_address.join("\n");
     assert!(
-        text.contains("note: similarity search disabled: no embeddings for"),
+        before_address.iter().any(|l| l
+            == "note: similarity search disabled (no embeddings for \
+                google/siglip2-base-patch16-224 in this library)"),
         "{text}"
     );
     assert!(
