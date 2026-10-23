@@ -1006,6 +1006,7 @@ fn the_no_embeddings_note_ends_with_the_pipeline_command() {
         common::stop_gallery(&mut child, port);
     } else {
         child.kill().ok();
+        child.wait().ok();
     }
     let text = before_address.join("\n");
     assert!(
