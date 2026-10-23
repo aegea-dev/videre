@@ -16,6 +16,23 @@ version number and are released together.
 ## [Unreleased]
 
 
+## [0.64.1] - 2026-10-23
+
+### Fixed
+
+- **The gallery has an icon.** Every page shows the videre mark in the
+  browser tab, and the server no longer logs `GET /favicon.ico -> 404` on
+  each visit.
+- **Security:** `rustls-webpki` 0.103.16, `webpki-roots` and
+  `webpki-root-certs` 1.0.11, for three advisories about distrusted
+  certificate intermediates in the TLS stack used to download models.
+
+### Changed
+
+- When a library has no embeddings, the hint (at gallery start and from
+  `search`, `classify` and MCP) says `run: videre embed`, without `--model`
+  for the default model, and adds `run (all features): videre pipeline`.
+
 ## [0.64.0] - 2026-10-20
 
 ### Fixed
@@ -3477,7 +3494,8 @@ takes the model id explicitly instead of reading it from the environment.
   skip it rather than failing.
 - First release published to crates.io.
 
-[Unreleased]: https://github.com/aegea-dev/videre/compare/v0.64.0...HEAD
+[Unreleased]: https://github.com/aegea-dev/videre/compare/v0.64.1...HEAD
+[0.64.1]: https://github.com/aegea-dev/videre/compare/v0.64.0...v0.64.1
 [0.64.0]: https://github.com/aegea-dev/videre/compare/v0.63.2...v0.64.0
 [0.63.2]: https://github.com/aegea-dev/videre/compare/v0.63.1...v0.63.2
 [0.63.1]: https://github.com/aegea-dev/videre/compare/v0.63.0...v0.63.1
