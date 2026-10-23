@@ -2031,6 +2031,9 @@ mod pages {
     pub const MAPLIBRE_JS: &str = include_str!("../../../static/maplibre-gl.js");
     pub const MAPLIBRE_CSS: &str = include_str!("../../../static/maplibre-gl.css");
     pub const PMTILES_JS: &str = include_str!("../../../static/pmtiles.js");
+    /// The videre mark, a copy of the docs site's `docs/public/favicon.svg`
+    /// (the crate cannot reach outside its own folder once packaged).
+    pub const FAVICON_SVG: &str = include_str!("../../../static/favicon.svg");
 }
 
 /// A failed gallery request: its status and, when known, why. The reason is
@@ -3876,6 +3879,20 @@ async fn handle_vendor_asset(
             ),
         ],
         body,
+    )
+        .into_response()
+}
+
+/// `GET /favicon.svg` and `GET /favicon.ico`: the videre mark. Every page links
+/// the SVG; `/favicon.ico` answers too because some browsers ask for it
+/// regardless, and each unanswered request was logged as a 404 warning.
+async fn handle_favicon() -> Response {
+    (
+        [
+            (axum::http::header::CONTENT_TYPE, "image/svg+xml"),
+            (axum::http::header::CACHE_CONTROL, "public, max-age=86400"),
+        ],
+        pages::FAVICON_SVG,
     )
         .into_response()
 }
@@ -5877,6 +5894,8 @@ async fn serve_faces_async(
         .route("/api/diagnostics/stats", get(handle_diagnostics_stats))
         .route("/api/diagnostics/logs", get(handle_diagnostics_logs))
         .route("/vendor/{version}/{asset}", get(handle_vendor_asset))
+        .route("/favicon.svg", get(handle_favicon))
+        .route("/favicon.ico", get(handle_favicon))
         // people
         .route(
             "/api/people",

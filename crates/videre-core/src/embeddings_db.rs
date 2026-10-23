@@ -126,10 +126,18 @@ pub fn attach_in(
             } else {
                 available.join(", ")
             };
+            // `--model` only when it is not the default, which plain
+            // `videre embed` already computes.
+            let embed = if model_id == crate::embeddings::DEFAULT_MODEL_ID {
+                "videre embed".to_string()
+            } else {
+                format!("videre embed --model {model_id}")
+            };
             anyhow::bail!(
                 "no embeddings for {model_id} in this library\n  \
                  expected: {}\n  available: {available}\n  \
-                 run: videre embed --model {model_id}",
+                 run: {embed}\n  \
+                 run (all features): videre pipeline",
                 path.display()
             );
         }
@@ -553,6 +561,22 @@ mod tests {
             "error must list what IS available: {msg}"
         );
         assert!(msg.contains("videre embed --model"), "{msg}");
+    }
+
+    /// The default model needs no `--model`, and the hint also names the
+    /// one command that brings every feature up to date.
+    #[test]
+    fn a_missing_default_model_suggests_plain_embed_and_pipeline() {
+        let ctx = test_context("missing-default");
+        let conn = Connection::open_in_memory().unwrap();
+        let err = attach_in(&conn, &ctx, crate::embeddings::DEFAULT_MODEL_ID, false).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("\n  run: videre embed\n"), "{msg}");
+        assert!(!msg.contains("--model"), "{msg}");
+        assert!(
+            msg.ends_with("\n  run (all features): videre pipeline"),
+            "{msg}"
+        );
     }
 
     #[test]

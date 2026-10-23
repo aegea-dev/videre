@@ -827,6 +827,11 @@ views. The `{version}` segment is videre's own version, emitted by the page as a
 cache buster so an upgrade fetches fresh bytes on the same port; its value is not
 validated. Any other `{asset}` is `404`.
 
+### `GET /favicon.svg`, `GET /favicon.ico`
+
+The videre mark as SVG, cached for a day. Every page links `/favicon.svg`;
+`/favicon.ico` answers with the same bytes for browsers that ask for it anyway.
+
 ## People
 
 ### `GET /api/people`
@@ -1196,6 +1201,8 @@ content-length: 0
 | `GET /api/diagnostics/stats` | What `videre stats --json` prints |
 | `GET /api/diagnostics/logs` | Read the log lines, filtered and paged |
 | `GET /vendor/{version}/{asset}` | Serve a vendored map library (MapLibre, pmtiles) |
+| `GET /favicon.svg` | Serve the videre icon |
+| `GET /favicon.ico` | Serve the videre icon, for browsers that ask for it |
 | `GET /api/people` | Search people |
 | `POST /api/people` | Create a person from faces |
 | `GET /api/people/{name}` | Read one person |

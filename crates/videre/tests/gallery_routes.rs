@@ -607,6 +607,38 @@ fn every_live_route_answers() {
     }
 }
 
+/// Every page names the icon, and both addresses a browser asks for answer
+/// with it: without them each visit logged `GET /favicon.ico -> 404`.
+#[test]
+fn every_page_has_the_favicon_and_it_is_served() {
+    let lib = fixture();
+    let server = Server::start(&lib);
+    for path in [
+        "/",
+        "/duplicates",
+        "/date",
+        "/events",
+        "/map",
+        "/people",
+        "/people/person/ozgur_demirtas",
+        "/people/cluster/1",
+        "/settings/config",
+        "/diagnostics/status",
+    ] {
+        let (status, body) = server.get(path);
+        assert_eq!(status, 200, "{path}");
+        assert!(
+            body.contains(r#"<link rel="icon" type="image/svg+xml" href="/favicon.svg">"#),
+            "{path} does not link the favicon"
+        );
+    }
+    for path in ["/favicon.svg", "/favicon.ico"] {
+        let (status, body) = server.get(path);
+        assert_eq!(status, 200, "{path}");
+        assert!(body.starts_with("<svg"), "{path}: {body:.40}");
+    }
+}
+
 #[test]
 fn no_embeddings_tells_the_client_to_hide_the_similar_button() {
     // fixture() seeds a file and a face but never embeds, so the active model
