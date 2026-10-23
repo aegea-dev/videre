@@ -94,16 +94,29 @@ test("Status reads again every 10 seconds while watch runs, and only then", asyn
     await route.fulfill({ response, json: doc });
   });
   await page.goto(`${gallery.baseURL}/diagnostics/status`);
+  // Drawn and the next read scheduled in one callback, so the timer exists.
   await expect(page.locator(".diag-head")).toContainText("watch running");
   expect(calls).toBe(1);
+  await page.clock.runFor(9_000);
+  expect(calls).toBe(1);
 
-  await page.clock.runFor(10_000);
-  await expect.poll(() => calls).toBe(2);
+  // The page schedules each read only once the previous answer is handled,
+  // and `calls` counts a request when it is sent, before that. Jumping the
+  // clock 10 s at that point skipped a timer that did not exist yet, and the
+  // test failed on a busy CI runner; small steps cannot skip it.
+  const stepUntil = async (n: number) => {
+    await expect
+      .poll(async () => {
+        await page.clock.runFor(1_000);
+        return calls;
+      })
+      .toBe(n);
+  };
+  await stepUntil(2);
 
   // Once watch has stopped, the page stops asking.
   running = false;
-  await page.clock.runFor(10_000);
-  await expect.poll(() => calls).toBe(3);
+  await stepUntil(3);
   await expect(page.locator(".diag-head")).toContainText("watch not running");
   await page.clock.runFor(30_000);
   expect(calls).toBe(3);
