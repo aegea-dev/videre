@@ -978,6 +978,48 @@ fn the_api_the_labeling_ui_depends_on_answers_json() {
 /// This is also the mechanism that would let `Server::start` above drop its
 /// mutex: with a trustworthy announced port there is no free-port race to
 /// serialise.
+/// The missing-embeddings note follows a colon, not parentheses: the hint
+/// runs over several lines, and a `)` after its last command read as part of
+/// `videre pipeline`.
+#[test]
+fn the_no_embeddings_note_ends_with_the_pipeline_command() {
+    let lib = fixture();
+    lib.no_gallery_watch();
+    let mut child = lib
+        .cmd()
+        .args(["gallery", "--port", "0"])
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("failed to spawn videre gallery --port 0");
+    let stderr = BufReader::new(child.stderr.take().unwrap());
+    let mut before_address = Vec::new();
+    let mut port = None;
+    for line in stderr.lines().map_while(Result::ok) {
+        if let Some(rest) = line.split("http://127.0.0.1:").nth(1) {
+            let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+            port = digits.parse::<u16>().ok();
+            break;
+        }
+        before_address.push(line);
+    }
+    if let Some(port) = port {
+        common::stop_gallery(&mut child, port);
+    } else {
+        child.kill().ok();
+    }
+    let text = before_address.join("\n");
+    assert!(
+        text.contains("note: similarity search disabled: no embeddings for"),
+        "{text}"
+    );
+    assert!(
+        before_address
+            .iter()
+            .any(|l| l == "  run (all features): videre pipeline"),
+        "{text}"
+    );
+}
+
 #[test]
 fn port_zero_announces_the_port_it_actually_bound() {
     let lib = fixture();

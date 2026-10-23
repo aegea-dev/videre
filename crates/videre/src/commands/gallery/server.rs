@@ -5812,7 +5812,9 @@ async fn serve_faces_async(
             &opts.context.library,
             &opts.model_id,
         ) {
-            tracing::info!("note: similarity search disabled ({e})");
+            // After a colon, not in parentheses: the hint runs over several
+            // lines, and a closing `)` read as part of its last command.
+            tracing::info!("note: similarity search disabled: {e}");
         }
     }
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
