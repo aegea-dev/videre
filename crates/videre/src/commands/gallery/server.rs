@@ -5812,7 +5812,13 @@ async fn serve_faces_async(
             &opts.context.library,
             &opts.model_id,
         ) {
-            tracing::info!("note: similarity search disabled ({e})");
+            tracing::info!(
+                "{}",
+                crate::commands::note_with_reason(
+                    "note: similarity search disabled",
+                    &e.to_string()
+                )
+            );
         }
     }
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();

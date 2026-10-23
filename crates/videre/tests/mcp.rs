@@ -461,6 +461,35 @@ fn search_text_without_embeddings_is_tool_error_and_server_survives() {
     assert!(errors[0].message.contains("no embeddings"), "{log}");
 }
 
+/// Starting without embeddings warns once, with the reason's first line in
+/// parentheses and the hint below it, so no `)` follows `videre pipeline`.
+#[test]
+fn starting_without_embeddings_warns_with_the_hint_below_the_reason() {
+    let lib = TestLibrary::new();
+    make_db(&lib);
+    let client = McpClient::start(&lib);
+    client.shutdown();
+
+    let log = std::fs::read_to_string(lib.context().paths.state.join("logs/mcp.log")).unwrap();
+    let warning = log
+        .lines()
+        .filter_map(videre_core::error_log::parse_line)
+        .find(|l| l.message.starts_with("videre mcp: search unavailable"))
+        .unwrap_or_else(|| panic!("no startup warning: {log}"));
+    let first = format!(
+        "videre mcp: search unavailable (no embeddings for {} in this library)\n",
+        videre_core::embeddings::DEFAULT_MODEL_ID
+    );
+    assert!(warning.message.starts_with(&first), "{}", warning.message);
+    assert!(
+        warning
+            .message
+            .ends_with("\n  run (all features): videre pipeline"),
+        "{}",
+        warning.message
+    );
+}
+
 #[test]
 fn search_with_no_input_or_two_rankers_is_tool_error() {
     let lib = TestLibrary::new();

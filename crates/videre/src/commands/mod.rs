@@ -98,9 +98,29 @@ pub(crate) fn parse_model_id(s: &str) -> Result<String, String> {
         .map_err(|e| e.to_string())
 }
 
+/// `what (reason)` for a reason on one line. A reason over several lines,
+/// such as the missing-embeddings hint, keeps only its first line in the
+/// parentheses and follows with the rest as written, so no `)` lands after
+/// its last line.
+pub(crate) fn note_with_reason(what: &str, reason: &str) -> String {
+    match reason.split_once('\n') {
+        Some((first, rest)) => format!("{what} ({first})\n{rest}"),
+        None => format!("{what} ({reason})"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::is_bulk_delete;
+    use super::{is_bulk_delete, note_with_reason};
+
+    #[test]
+    fn a_reason_over_several_lines_keeps_only_its_first_in_parentheses() {
+        assert_eq!(
+            note_with_reason("note: off", "kayıp\n  run: videre embed"),
+            "note: off (kayıp)\n  run: videre embed"
+        );
+        assert_eq!(note_with_reason("note: off", "kayıp"), "note: off (kayıp)");
+    }
 
     #[test]
     fn is_bulk_delete_needs_both_fraction_and_floor() {
