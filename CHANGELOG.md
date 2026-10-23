@@ -16,6 +16,15 @@ version number and are released together.
 ## [Unreleased]
 
 
+## [0.64.2] - 2026-10-23
+
+### Fixed
+
+- The gallery's "similarity search disabled" note, and `videre mcp`'s
+  "search unavailable" warning, no longer end with a `)` that read as part
+  of `videre pipeline`. The reason stays in parentheses on the first line,
+  and the expected, available and `run:` lines follow below it.
+
 ## [0.64.1] - 2026-10-23
 
 ### Fixed
@@ -3494,7 +3503,8 @@ takes the model id explicitly instead of reading it from the environment.
   skip it rather than failing.
 - First release published to crates.io.
 
-[Unreleased]: https://github.com/aegea-dev/videre/compare/v0.64.1...HEAD
+[Unreleased]: https://github.com/aegea-dev/videre/compare/v0.64.2...HEAD
+[0.64.2]: https://github.com/aegea-dev/videre/compare/v0.64.1...v0.64.2
 [0.64.1]: https://github.com/aegea-dev/videre/compare/v0.64.0...v0.64.1
 [0.64.0]: https://github.com/aegea-dev/videre/compare/v0.63.2...v0.64.0
 [0.63.2]: https://github.com/aegea-dev/videre/compare/v0.63.1...v0.63.2
