@@ -16,6 +16,14 @@ version number and are released together.
 ## [Unreleased]
 
 
+## [0.64.3] - 2026-11-02
+
+### Fixed
+
+- **Security:** `candle` 0.11.1 with `zip` 9.2.2, for RUSTSEC-2026-0429
+  (`zip` 8.6 aborts while extracting a symlink entry with a large declared
+  size), which `candle` 0.11.0 pulled in. `cargo audit` passes again.
+
 ## [0.64.2] - 2026-10-23
 
 ### Fixed
@@ -3503,7 +3511,8 @@ takes the model id explicitly instead of reading it from the environment.
   skip it rather than failing.
 - First release published to crates.io.
 
-[Unreleased]: https://github.com/aegea-dev/videre/compare/v0.64.2...HEAD
+[Unreleased]: https://github.com/aegea-dev/videre/compare/v0.64.3...HEAD
+[0.64.3]: https://github.com/aegea-dev/videre/compare/v0.64.2...v0.64.3
 [0.64.2]: https://github.com/aegea-dev/videre/compare/v0.64.1...v0.64.2
 [0.64.1]: https://github.com/aegea-dev/videre/compare/v0.64.0...v0.64.1
 [0.64.0]: https://github.com/aegea-dev/videre/compare/v0.63.2...v0.64.0
