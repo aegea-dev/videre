@@ -30,7 +30,7 @@ A local-first tool for making sense of a folder full of photos and videos.
 Free and open source under the permissive Apache 2.0 licence: no account, no
 subscription, no lock-in, and every line is yours to read, audit, or build on.
 
-**Documentation: [docs.videre.sh](https://docs.videre.sh)**
+**Documentation: [docs.videre.sh]**
 
 ## Why videre
 
@@ -99,7 +99,7 @@ On macOS or Linux with Homebrew:
 brew install aegea-dev/tap/videre
 ```
 
-Or download a binary from the [latest release](https://github.com/aegea-dev/videre/releases/latest)
+Or download a binary from the [latest release]
 and put it on your `PATH`. No Rust toolchain needed, nothing to compile.
 
 Or build it yourself, which needs Rust:
@@ -122,7 +122,7 @@ files are skipped for thumbnails, search, and face detection. They are still
 scanned, hashed, and de-duplicated.
 
 Full install notes, including the extra flag needed to build on ARM64 Linux:
-[docs.videre.sh/start/install](https://docs.videre.sh/start/install/)
+[docs.videre.sh/start/install]
 
 ## Quickstart
 
@@ -159,13 +159,13 @@ videre search '"sunset over the sea" (person:Alice OR person:Bob) place:lisbon r
 ```
 
 Queries follow the familiar Gmail and GitHub search style:
-[docs.videre.sh/reference/query-syntax](https://docs.videre.sh/reference/query-syntax/)
+[docs.videre.sh/reference/query-syntax]
 
 The first `videre embed` downloads about 1.5 GB of model data, and `videre
 faces` a separate 180 MB. Nothing is downloaded until you run a command that
 needs it, and both are resumable.
 
-More: [docs.videre.sh/start/quickstart](https://docs.videre.sh/start/quickstart/)
+More: [docs.videre.sh/start/quickstart]
 
 ## Commands
 
@@ -174,17 +174,29 @@ More: [docs.videre.sh/start/quickstart](https://docs.videre.sh/start/quickstart/
 `status`, `stats`, `config`, `mcp`.
 
 Every command takes `--help`. Full reference with every flag:
-[docs.videre.sh/commands](https://docs.videre.sh/commands/)
+[docs.videre.sh/commands]
+
+## AI Usage
+
+`videre` is developed by [Erhan Gundogan] with substantial help from AI coding assistants (mostly Claude Code and OpenAI Codex).
 
 ## Contributing
 
 videre is maintained by one person and its direction is set deliberately. Bug
 reports are always welcome. If you hit a real problem or want a feature you
 would use yourself, so are patches: open an issue first to agree the approach.
-See [CONTRIBUTING.md](CONTRIBUTING.md).
+See [CONTRIBUTING.md].
 
 ## License
 
-Apache License 2.0. See [LICENSE](LICENSE).
+Apache License 2.0. See [LICENSE].
 
-`videre` is developed by `Erhan Gundogan` with substantial help from AI coding assistants (Claude Code and OpenAI Codex).
+[Erhan Gundogan]: https://github.com/erhangundogan
+[docs.videre.sh]: https://docs.videre.sh
+[latest release]: https://github.com/aegea-dev/videre/releases/latest
+[docs.videre.sh/start/install]: https://docs.videre.sh/start/install/
+[docs.videre.sh/reference/query-syntax]: https://docs.videre.sh/reference/query-syntax/
+[docs.videre.sh/start/quickstart]: https://docs.videre.sh/start/quickstart/
+[docs.videre.sh/commands]: https://docs.videre.sh/commands/
+[CONTRIBUTING.md]: CONTRIBUTING.md
+[LICENSE]: LICENSE
