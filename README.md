@@ -186,3 +186,5 @@ See [CONTRIBUTING.md](CONTRIBUTING.md).
 ## License
 
 Apache License 2.0. See [LICENSE](LICENSE).
+
+`videre` is developed by `Erhan Gundogan` with substantial help from AI coding assistants (Claude Code and OpenAI Codex).
