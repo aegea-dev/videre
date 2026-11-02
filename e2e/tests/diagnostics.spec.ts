@@ -88,9 +88,12 @@ test("Status reads again every 10 seconds while watch runs, and only then", asyn
   let running = true;
   await page.route("**/api/diagnostics/status", async (route) => {
     calls += 1;
+    // as watch was when the page asked: the test turns it off right after
+    // seeing a request counted, maybe before that request is answered
+    const answer = running;
     const response = await route.fetch();
     const doc = await response.json();
-    doc.report.watch.running = running;
+    doc.report.watch.running = answer;
     await route.fulfill({ response, json: doc });
   });
   await page.goto(`${gallery.baseURL}/diagnostics/status`);
