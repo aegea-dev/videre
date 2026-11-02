@@ -35,6 +35,8 @@ Private/local context may exist outside this repository, but it must not be quot
 - Full verification: make verify
 - Install docs deps: make docs-install
 - Build docs: make docs-build
+- Install gallery E2E deps and Chromium: make e2e-install
+- Run gallery E2E (Playwright, not part of test or verify): make e2e
 
 The clippy CI job runs on **Linux**, so a macOS `make lint-check` cannot see a
 lint that only exists in the Linux config (the `cfg(target_os = "macos")`

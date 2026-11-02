@@ -171,7 +171,7 @@ More: [docs.videre.sh/start/quickstart]
 
 `scan`, `import`, `dedupe`, `gallery`, `search`, `embed`, `faces`, `classify`,
 `locations`, `fix-dates`, `mark`, `tag`, `export`, `prune`, `pipeline`, `watch`,
-`status`, `stats`, `config`, `mcp`.
+`status`, `stats`, `config`, `mcp`, `completion`.
 
 Every command takes `--help`. Full reference with every flag:
 [docs.videre.sh/commands]

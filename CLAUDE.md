@@ -80,7 +80,9 @@ subcommands only goes in a module under `crates/videre/src/`.
   gives each child process its own library root, `HOME` and `HF_HOME`.
 - A test that loads a real model holds the shared `ModelCacheGuard` and uses
   `model_cmd(&guard)`; everything else uses `cmd()`.
-- Gallery e2e: `cargo build -p videre`, then `yarn --cwd e2e playwright test`.
+- Gallery e2e: `make e2e-install` once, then `make e2e` (builds the debug
+  binary first). It is not part of `make test` or `make verify`; CI runs it
+  in its own workflow.
 
 ## The commit guard
 
