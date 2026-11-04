@@ -211,6 +211,9 @@
     var q=query();
     var here=HONOURS.test(location.pathname)&&(RANKS.test(location.pathname)||!input.value.trim());
     var params=here?new URLSearchParams(location.search):new URLSearchParams();
+    // A search ranks by words or by an example, never both, so words typed on
+    // a Similar page start a word search; filters keep narrowing the example.
+    if(parse(q).words)params.delete('like');
     if(q)params.set('q',q); else params.delete('q');
     var rest=params.toString().replace(/\+/g,'%20');
     location.href=(here?location.pathname:'/')+(rest?'?'+rest:'');

@@ -73,3 +73,37 @@ test("a text search has its own page too", async ({ page, searchGallery }) => {
   await expect(rankedNames(page)).toHaveText(["bahçe.jpg"]);
   await expect(page.locator("#gallery .card .score")).toHaveText("0.420");
 });
+
+// Words rank, and a search ranks by words or by an example, never both: words
+// typed on a Similar page start a word search, while a filter narrows the
+// example's ranking.
+test("words typed on a Similar page search by those words", async ({ page, searchGallery }) => {
+  await preferListView(searchGallery);
+  const hash = await hashOf(page, searchGallery, "çiçek.jpg");
+  const bahce = await hashOf(page, searchGallery, "bahçe.jpg");
+  await page.route((url) => url.pathname === "/api/search" && !url.searchParams.has("like"), (route) =>
+    route.fulfill({ json: { total: 1, results: [{ hash: bahce, score: 0.42 }] } }));
+  await page.goto(`${searchGallery.baseURL}/search?like=${hash}&from=%2F`);
+  await expect(page.locator("#search-head")).toContainText("Similar to çiçek.jpg");
+
+  const input = page.locator("#nav-search");
+  await input.fill("kırmızı");
+  await input.press("Enter");
+  await expect(page.locator("#search-head")).toContainText("Results for “kırmızı”");
+  expect(new URL(page.url()).searchParams.has("like")).toBe(false);
+  await expect(rankedNames(page)).toHaveText(["bahçe.jpg"]);
+  await expect(page.locator(".query-status.query-error")).toHaveCount(0);
+});
+
+test("a filter typed on a Similar page keeps its example", async ({ page, searchGallery }) => {
+  await preferListView(searchGallery);
+  const hash = await hashOf(page, searchGallery, "çiçek.jpg");
+  await page.goto(`${searchGallery.baseURL}/search?like=${hash}`);
+  await expect(page.locator("#search-head")).toContainText("Similar to çiçek.jpg");
+
+  const input = page.locator("#nav-search");
+  await input.fill("type:image");
+  await input.press("Enter");
+  await expect(page).toHaveURL(`${searchGallery.baseURL}/search?like=${hash}&q=type%3Aimage`);
+  await expect(page.locator("#search-head")).toContainText("Similar to çiçek.jpg");
+});
