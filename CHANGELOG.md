@@ -16,6 +16,15 @@ version number and are released together.
 ## [Unreleased]
 
 
+## [0.64.4] - 2026-11-04
+
+### Fixed
+
+- **Gallery:** words typed into the query box on a Similar page now search by
+  those words. They used to keep the page's example photo and fail with
+  "words rank, so they cannot come with an example". A filter typed there
+  still narrows the Similar ranking.
+
 ## [0.64.3] - 2026-11-02
 
 ### Fixed
@@ -3511,7 +3520,8 @@ takes the model id explicitly instead of reading it from the environment.
   skip it rather than failing.
 - First release published to crates.io.
 
-[Unreleased]: https://github.com/aegea-dev/videre/compare/v0.64.3...HEAD
+[Unreleased]: https://github.com/aegea-dev/videre/compare/v0.64.4...HEAD
+[0.64.4]: https://github.com/aegea-dev/videre/compare/v0.64.3...v0.64.4
 [0.64.3]: https://github.com/aegea-dev/videre/compare/v0.64.2...v0.64.3
 [0.64.2]: https://github.com/aegea-dev/videre/compare/v0.64.1...v0.64.2
 [0.64.1]: https://github.com/aegea-dev/videre/compare/v0.64.0...v0.64.1
