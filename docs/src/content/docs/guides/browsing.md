@@ -170,7 +170,8 @@ the database, which an exported file does not have. Without embeddings,
 
 The **Similar** button on a card or in the lightbox ranks the whole library
 against that photo and opens the ranking as a page of its own, with a **Back**
-link to where you pressed it. The
+link to where you pressed it. A filter typed there narrows that ranking;
+words start a new search by those words instead. The
 server does the ranking, so it works at any library size, and the page never
 downloads a vector. It appears only once the library has embeddings; with none
 there is nothing to rank against, so the button is omitted rather than shown and
