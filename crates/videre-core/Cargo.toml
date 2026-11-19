@@ -35,6 +35,13 @@ ureq = { version = "~3.4.0", features = ["json"] }
 matrixmultiply = "~0.3.11"
 tempfile = "~3.27.0"
 tracing = "~0.1.44"
+# In-process HEIC and video decoding for Linux, named only in
+# `native_decode.rs` so the whole backend can be swapped out in one step.
+heif-oxide = "~0.1.1"
+rust_h265 = "~0.4.1"
+rust_h264 = "~0.6.1"
+re_mp4 = "~0.5.1"
+yuv = { version = "~0.8.20", default-features = false }
 
 [dev-dependencies]
 libc = "~0.2.189"
