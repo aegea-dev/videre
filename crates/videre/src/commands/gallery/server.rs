@@ -6012,7 +6012,9 @@ async fn serve_faces_async(
     if opts.browse {
         // After the listener binds, or the browser races it and lands on a
         // connection refused.
-        let _ = std::process::Command::new("open").arg(&url).spawn();
+        // The platform's own opener: `open` on macOS, `xdg-open` and its
+        // fallbacks on Linux.
+        let _ = open::that_detached(&url);
     }
     axum::serve(listener, app)
         .with_graceful_shutdown(async {
