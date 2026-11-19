@@ -16,6 +16,39 @@ version number and are released together.
 ## [Unreleased]
 
 
+## [0.65.0] - 2026-11-19
+
+### Added
+
+- **HEIC photos and videos work on Linux.** They used to be skipped there,
+  because videre decoded them only through macOS QuickLook. videre now
+  decodes them itself on Linux, with nothing extra to install, so they get
+  thumbnails, search, face detection, near-duplicate fingerprints and video
+  poster tiles in the gallery. A HEIC shows as on macOS; a video is read from
+  its first keyframe, H.264 or HEVC, turned by its rotation. Other video
+  codecs (Dolby Vision, Motion JPEG) are skipped after two attempts, and HDR
+  is shown without tone mapping. macOS keeps using QuickLook.
+
+### Fixed
+
+- `videre gallery --browse` opens a browser on Linux. It ran macOS's `open`,
+  so on Linux it did nothing.
+
+### Changed
+
+- `rusqlite` 0.41 (bundled SQLite), `rmcp` 3.11 and `quinn-udp` 0.5.16,
+  fixing five security advisories (RUSTSEC-2026-0459, 0461, 0457, 0462 and
+  0538). `cargo audit` passes again.
+
+### Upgrading
+
+- **On Linux,** HEIC and video files that earlier runs skipped are picked up
+  by the next `embed`, `faces` or `watch` run (at the latest a day after they
+  were last skipped), so the first run after upgrading takes longer.
+- **For crates depending on `videre-core`, `videre-api` or `videre-ml`:**
+  their public API uses `rusqlite` types, which move from 0.40 to 0.41, so
+  update `rusqlite` to 0.41 along with them.
+
 ## [0.64.4] - 2026-11-04
 
 ### Fixed
@@ -3520,7 +3553,8 @@ takes the model id explicitly instead of reading it from the environment.
   skip it rather than failing.
 - First release published to crates.io.
 
-[Unreleased]: https://github.com/aegea-dev/videre/compare/v0.64.4...HEAD
+[Unreleased]: https://github.com/aegea-dev/videre/compare/v0.65.0...HEAD
+[0.65.0]: https://github.com/aegea-dev/videre/compare/v0.64.4...v0.65.0
 [0.64.4]: https://github.com/aegea-dev/videre/compare/v0.64.3...v0.64.4
 [0.64.3]: https://github.com/aegea-dev/videre/compare/v0.64.2...v0.64.3
 [0.64.2]: https://github.com/aegea-dev/videre/compare/v0.64.1...v0.64.2
