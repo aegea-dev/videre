@@ -65,9 +65,9 @@ Worth knowing before changing anything:
   videre: building, testing and getting a change in. Surprising code has its
   reason in a comment beside it.
 
-macOS is the primary platform. Linux works with one gap: HEIC photos and video
-frames are decoded through a macOS system tool, so those files are skipped for
-thumbnails, search and face detection on Linux.
+macOS is the primary platform. On Linux, HEIC photos and video frames are
+decoded inside videre instead of through macOS QuickLook, from a video's first
+keyframe and without HDR tone mapping.
 
 ## Licensing of contributions
 

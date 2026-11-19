@@ -57,12 +57,11 @@ lightbox match Finder and other metadata-aware viewers. Later requests, includin
 files fetched through **Show more**, read the cached preview without reopening or
 decoding the original.
 
-On macOS, video grid tiles are a still poster frame (extracted upright through
-QuickLook, so a clip that carries rotation is never shown sideways), marked with
-a small play badge so a video is distinguishable from a photo; the video plays in
-the lightbox when you click it. The poster is cached like the other previews. On
-other platforms, where videre has no video frame extraction, tiles remain the
-plain inline video, also badged.
+Video grid tiles are a still poster frame (extracted upright, so a clip that
+carries rotation is never shown sideways), marked with a small play badge so a
+video is distinguishable from a photo; the video plays in the lightbox when you
+click it. The poster is cached like the other previews. On macOS it comes from
+QuickLook; on Linux it is the clip's first keyframe.
 
 A browser plays only some video formats: older camera clips in Motion JPEG,
 and ProRes, do not play in any of them. For such a clip the lightbox says the

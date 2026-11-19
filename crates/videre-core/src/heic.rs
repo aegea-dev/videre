@@ -11,7 +11,7 @@ use std::time::Duration;
 /// volume can make `qlmanage`'s own file access block indefinitely on macOS
 /// rather than fail fast, which otherwise freezes the calling command with
 /// no output; this bounds that to a single conversion's worth of waiting.
-const QLMANAGE_TIMEOUT: Duration = Duration::from_secs(20);
+pub(crate) const QLMANAGE_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// Default max `qlmanage` processes running at once, process-wide, unless
 /// overridden via `set_qlmanage_concurrency` (e.g. `videre faces
@@ -209,13 +209,6 @@ pub fn decode_via_quicklook(
     tag: &str,
     max_size: Option<u32>,
 ) -> anyhow::Result<DynamicImage> {
-    if !cfg!(target_os = "macos") {
-        // Long explanation once per run; short typed reason per file. The
-        // warning has already fired by the time the caller sees this error.
-        warn_quicklook_unavailable_once();
-        return Err(anyhow::anyhow!("needs macOS QuickLook (`qlmanage`)")
-            .context(crate::error_kind::ErrorKind::QuicklookUnavailable));
-    }
     // `qlmanage -t` does not fail on a container with no video track, it
     // hangs. Extension-gated so HEIC, which shares this function, is
     // untouched, and placed before the semaphore so a skipped file never
@@ -228,6 +221,19 @@ pub fn decode_via_quicklook(
         && !crate::video_probe::has_video_track(path)
     {
         anyhow::bail!("no video track (audio-only file); skipped without calling QuickLook");
+    }
+    if !cfg!(target_os = "macos") {
+        // Linux decodes in-process; the backend is one module, see its doc.
+        #[cfg(target_os = "linux")]
+        return crate::native_decode::decode(path, max_size);
+        // Elsewhere: a long explanation once per run, a short typed reason
+        // per file. The warning has fired by the time the caller sees this.
+        #[cfg(not(target_os = "linux"))]
+        {
+            warn_quicklook_unavailable_once();
+            return Err(anyhow::anyhow!("needs macOS QuickLook (`qlmanage`)")
+                .context(crate::error_kind::ErrorKind::QuicklookUnavailable));
+        }
     }
     // A scratch directory of this call's own, removed when `scratch` drops,
     // so simultaneous decodes of one file cannot delete each other's output
@@ -358,16 +364,23 @@ pub fn warn_if_timeout(error: &anyhow::Error) {
     }
 }
 
-/// Message shared by every QuickLook entry point, so a non-macOS user gets one
-/// clear explanation instead of a stream of opaque per-file decode failures.
+/// Whether this platform turns HEIC and video into pixels at all: QuickLook on
+/// macOS, `native_decode` on Linux. The one answer for every caller that
+/// offers something built on those pixels, such as video poster tiles.
+pub const FRAMES_AVAILABLE: bool = cfg!(any(target_os = "macos", target_os = "linux"));
+
+/// Message shared by every QuickLook entry point, so a user on a platform
+/// with no decoder gets one clear explanation instead of a stream of opaque
+/// per-file decode failures.
 pub const QUICKLOOK_UNAVAILABLE: &str =
     "HEIC images and video frames are decoded via macOS QuickLook (`qlmanage`), \
      which has no equivalent on this platform - those files are skipped. \
      Scanning, dedupe, and search still work for jpg/jpeg/png/gif/webp/bmp/tiff.";
 
-/// Prints `QUICKLOOK_UNAVAILABLE` at most once per process. Called on the
-/// non-macOS path of the QuickLook decoder: without it a Linux user just sees
-/// each HEIC/video silently fail to decode, with nothing saying why.
+/// Prints `QUICKLOOK_UNAVAILABLE` at most once per process. Called where the
+/// QuickLook decoder has no backend: without it a user just sees each
+/// HEIC/video silently fail to decode, with nothing saying why.
+#[cfg(not(target_os = "linux"))]
 fn warn_quicklook_unavailable_once() {
     static WARNED: std::sync::Once = std::sync::Once::new();
     WARNED.call_once(|| {
@@ -377,6 +390,7 @@ fn warn_quicklook_unavailable_once() {
 
 /// The QuickLook-unavailable warning, carrying its kind so the log records
 /// why HEIC and video files were skipped on this platform.
+#[cfg(not(target_os = "linux"))]
 fn quicklook_unavailable() -> anyhow::Error {
     anyhow::anyhow!(QUICKLOOK_UNAVAILABLE)
         .context(crate::error_kind::ErrorKind::QuicklookUnavailable)
@@ -488,6 +502,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(target_os = "linux"))]
     fn the_quicklook_warning_carries_its_kind_and_the_full_explanation() {
         let err = quicklook_unavailable();
         assert_eq!(
@@ -504,7 +519,7 @@ mod tests {
     /// and a second request asked for the same uncached video poster.
     #[test]
     fn simultaneous_conversions_of_one_file_all_succeed() {
-        if !cfg!(target_os = "macos") {
+        if !FRAMES_AVAILABLE {
             return;
         }
         let video = concat!(
@@ -531,7 +546,7 @@ mod tests {
     /// QLMANAGE_TIMEOUT (20s). Reached across crates the same way the
     /// simultaneous-conversions test above reaches red_1s.mp4.
     #[test]
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     fn an_audio_only_video_is_rejected_before_quicklook_is_called() {
         let audio_only = concat!(
             env!("CARGO_MANIFEST_DIR"),
@@ -544,15 +559,13 @@ mod tests {
         );
     }
 
-    /// Off macOS the shared decoder fails with the typed
-    /// QuicklookUnavailable kind, so pipeline runs record the real reason
-    /// and callers that swallow the error have already seen the long
-    /// once-per-process warning.
+    /// With no decoder (neither macOS nor Linux) the shared decoder fails
+    /// with the typed QuicklookUnavailable kind, so pipeline runs record the
+    /// real reason and callers that swallow the error have already seen the
+    /// long once-per-process warning.
     #[test]
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     fn without_quicklook_the_decode_fails_with_the_quicklook_unavailable_kind() {
-        if cfg!(target_os = "macos") {
-            return;
-        }
         let err =
             decode_via_quicklook(Path::new("/nonexistent.mov"), "kind-test", None).unwrap_err();
         assert_eq!(

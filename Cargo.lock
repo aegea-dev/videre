@@ -1872,6 +1872,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
+name = "heif-oxide"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1b701a7c7f05f731da7b78c4cb3da03255a17c73b6d412b37e09f62b9423c49f"
+dependencies = [
+ "rust_h265",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "hermit-abi"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2284,6 +2294,25 @@ name = "ipnet"
 version = "2.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6a756c3fac73139e83f14c2d742155dd2b78d3ee56597b419a0579b7bdd6dd78"
+
+[[package]]
+name = "is-docker"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "928bae27f42bc99b60d9ac7334e3a21d10ad8f1835a4e12ec3ec0464765ed1b3"
+dependencies = [
+ "once_cell",
+]
+
+[[package]]
+name = "is-wsl"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "173609498df190136aa7dea1a91db051746d339e18476eed5ca40521f02d7aa5"
+dependencies = [
+ "is-docker",
+ "once_cell",
+]
 
 [[package]]
 name = "is_executable"
@@ -2857,6 +2886,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "num-bigint"
+version = "0.4.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c89e69e7e0f03bea5ef08013795c25018e101932225a656383bd384495ecc367"
+dependencies = [
+ "num-integer",
+ "num-traits",
+]
+
+[[package]]
 name = "num-complex"
 version = "0.4.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2879,6 +2918,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7ce2d95d4b3734dc35aa2f45e1aa22cd416814592a4f9d9205e11affd5b8e10b"
 dependencies = [
  "num-traits",
+]
+
+[[package]]
+name = "num-rational"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f83d14da390562dca69fc84082e73e548e1ad308d24accdedd2720017cb37824"
+dependencies = [
+ "num-bigint",
+ "num-integer",
+ "num-traits",
+ "serde",
 ]
 
 [[package]]
@@ -3011,6 +3062,16 @@ checksum = "1e68317604e77e53b85896388e1a803c1d21b74c899ec9e5e1112db90735edd7"
 dependencies = [
  "cc",
  "pkg-config",
+]
+
+[[package]]
+name = "open"
+version = "5.4.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8d8c8b8e725ad26404d6896eb2f064294a0a7b4f1d9120210d85544684c4ca95"
+dependencies = [
+ "is-wsl",
+ "libc",
 ]
 
 [[package]]
@@ -3547,6 +3608,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "re_mp4"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "63d71dca1bc07c053ed67ccfd0b52df652192a6541fbdf85cc3d46142e20d709"
+dependencies = [
+ "byteorder",
+ "bytes",
+ "num-rational",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "reborrow"
 version = "0.5.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3789,6 +3864,18 @@ dependencies = [
  "smallvec",
  "sqlite-wasm-rs",
 ]
+
+[[package]]
+name = "rust_h264"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "49a852e1544c48fba7d072620420c602f195092e3774655584ef5e4e6fd056a9"
+
+[[package]]
+name = "rust_h265"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "673f6ab280648836c8a4b2bdaf4877532b2715e3fdcf6e37a2f46ebed41c8cfd"
 
 [[package]]
 name = "rustc-hash"
@@ -5131,6 +5218,7 @@ dependencies = [
  "notify-debouncer-full",
  "objc2",
  "objc2-foundation",
+ "open",
  "rayon",
  "rmcp",
  "roxmltree",
@@ -5181,12 +5269,16 @@ dependencies = [
  "flate2",
  "fs2",
  "half",
+ "heif-oxide",
  "image",
  "indicatif",
  "libc",
  "matrixmultiply",
+ "re_mp4",
  "reverse_geocoder",
  "rusqlite",
+ "rust_h264",
+ "rust_h265",
  "rustix",
  "serde",
  "serde_json",
@@ -5195,6 +5287,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "ureq",
+ "yuv",
 ]
 
 [[package]]
@@ -5888,6 +5981,15 @@ dependencies = [
  "quote",
  "syn 2.0.119",
  "synstructure",
+]
+
+[[package]]
+name = "yuv"
+version = "0.8.20"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3d109d1eacc7b034329873d2d848039b365c65ab7d751b19ee84e4921c62c607"
+dependencies = [
+ "num-traits",
 ]
 
 [[package]]

@@ -116,10 +116,9 @@ newer Homebrew install. Check with `which videre`, and remove it with
 **Intel Macs are not supported.** A dependency ships no prebuilt binaries for
 them, so videre cannot be built there at all, including via `cargo install`.
 
-**macOS is the primary platform.** videre also runs on Linux, with one gap: HEIC
-photos and video frames are decoded using a macOS system tool, so on Linux those
-files are skipped for thumbnails, search, and face detection. They are still
-scanned, hashed, and de-duplicated.
+**macOS is the primary platform.** videre also runs on Linux, where it decodes
+HEIC photos and video frames itself instead of through macOS QuickLook: a
+video's first keyframe, and no HDR tone mapping.
 
 Full install notes, including the extra flag needed to build on ARM64 Linux:
 [docs.videre.sh/start/install]

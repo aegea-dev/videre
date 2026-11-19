@@ -52,7 +52,7 @@ pub struct VideoMeta {
 /// Stops rather than erroring on a malformed size, so a truncated tail yields
 /// the children that did parse. Every caller here treats absence as "unknown",
 /// so partial data is strictly better than none.
-fn children(buf: &[u8]) -> Vec<([u8; 4], &[u8])> {
+pub(crate) fn children(buf: &[u8]) -> Vec<([u8; 4], &[u8])> {
     let mut out = Vec::new();
     let mut i = 0usize;
     while i + 8 <= buf.len() {

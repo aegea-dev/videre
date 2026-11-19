@@ -107,7 +107,8 @@ screenshot *of* a photo is genuinely ambiguous and often ends up `unknown`.
 
 **It needs `videre embed` first.** Classification scores existing vectors; there
 is nothing to score without them. Images that were not embedded (`.dng`, and
-HEIC or video on Linux) are simply absent from the results.
+on Linux a video in a codec other than H.264 or HEVC) are simply absent from
+the results.
 
 **Videos are excluded entirely**, since none of the four categories describes a
 video frame.

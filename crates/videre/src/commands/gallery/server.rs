@@ -2902,7 +2902,7 @@ fn render_map(
          var GVIEW=\"all\";\nvar PEOPLE_ROOT=\"/people\";\nvar GDATE=null;\nvar GLOC={location_json};\nvar GROUPS=[];\n\
          var STREET_DETAIL={street_detail};",
         has_embeddings,
-        cfg!(target_os = "macos")
+        videre_core::heic::FRAMES_AVAILABLE
     );
     let page = pages::Map {
         settings_script,
@@ -6012,7 +6012,9 @@ async fn serve_faces_async(
     if opts.browse {
         // After the listener binds, or the browser races it and lands on a
         // connection refused.
-        let _ = std::process::Command::new("open").arg(&url).spawn();
+        // The platform's own opener: `open` on macOS, `xdg-open` and its
+        // fallbacks on Linux.
+        let _ = open::that_detached(&url);
     }
     axum::serve(listener, app)
         .with_graceful_shutdown(async {

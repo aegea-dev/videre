@@ -631,10 +631,11 @@ mod tests {
 
     /// After a fallback render the full-resolution original is in the cache:
     /// the first crop pays for the QuickLook render and the photo's other
-    /// crops read it. macOS only: the fallback is a real QuickLook render of
-    /// the committed `tiny.heic` fixture.
+    /// crops read it. Needs a HEIC decoder (QuickLook, or `native_decode` on
+    /// Linux): the fallback is a real render of the committed `tiny.heic`
+    /// fixture.
     #[test]
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     fn a_fallback_render_publishes_the_cached_original() {
         let temp = tempfile::tempdir().unwrap();
         let ctx =

@@ -1542,11 +1542,11 @@ fn build_data_block(
         View::Events => "events",
         View::All | View::Duplicates => "all",
     };
-    // Video grid tiles are served as oriented poster frames only on a live macOS
-    // server: poster extraction is QuickLook (macOS-only), and a static export
-    // has no server to fetch them from. Elsewhere the client keeps the plain
-    // `<video>` tile. See buildPreview in gallery.js.
-    let video_posters = live && cfg!(target_os = "macos");
+    // Video grid tiles are served as oriented poster frames only on a live
+    // server whose platform can decode a frame (`heic::FRAMES_AVAILABLE`); a
+    // static export has no server to fetch them from. Elsewhere the client
+    // keeps the plain `<video>` tile. See buildPreview in gallery.js.
+    let video_posters = live && videre_core::heic::FRAMES_AVAILABLE;
     out.push_str(&format!(
         "<script>\nvar LIVE_SERVER={live};\nvar HAS_EMBEDDINGS={has_embeddings};\nvar VIDEO_POSTERS={video_posters};\nvar GVIEW={};\nvar PEOPLE_ROOT={};\nvar GDATE={};\nvar GEVENT={};\nvar GLOC=null;\nvar GQUERY_RESULT={};\n</script>\n",
         json_str(view),

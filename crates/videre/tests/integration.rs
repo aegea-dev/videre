@@ -15,7 +15,7 @@ fn scan(lib: &TestLibrary, extra: &[&str]) {
 
 /// Store fingerprints computed exactly as `videre embed` computes them, so the
 /// grouping is tested without loading the model.
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 fn fingerprint(lib: &TestLibrary) {
     let conn = lib.conn();
     let size = videre_ml::model::image_size_for(videre_core::embeddings::DEFAULT_MODEL_ID);
@@ -122,7 +122,7 @@ fn dedupe_similar_reports_empty_when_no_phash_data() {
 }
 
 #[test]
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 fn dedupe_similar_groups_a_video_and_its_recompressed_variant() {
     // Real near-duplicate scenario: same source content, different bytes/bitrate
     // (a genuine re-encode), not byte-identical files. testsrc_1s.mp4 uses a
@@ -175,7 +175,7 @@ fn dedupe_similar_groups_a_video_and_its_recompressed_variant() {
 }
 
 #[test]
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 fn dedupe_similar_does_not_group_two_visually_different_videos() {
     // Negative case for the positive test above: a flat solid-red clip and a
     // structured test-pattern clip must NOT be grouped as near-duplicates.

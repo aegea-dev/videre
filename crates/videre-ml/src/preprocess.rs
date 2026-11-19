@@ -70,7 +70,7 @@ pub fn to_tensor(img: &image::DynamicImage, size: usize, device: &Device) -> Res
 #[cfg(test)]
 mod tests {
     #[test]
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     fn embed_source_dhash_stays_within_the_similarity_threshold_of_the_64px_one() {
         // Fingerprints stored by the old `scan --similar` path came from a 64px
         // QuickLook render; embed now hashes its own, larger render. They must
@@ -170,7 +170,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     fn preprocess_extracts_a_frame_from_a_real_mp4() {
         let t = image_to_tensor(
             std::path::Path::new("tests/fixtures/red_1s.mp4"),

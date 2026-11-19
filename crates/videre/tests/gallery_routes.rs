@@ -217,7 +217,7 @@ impl Server {
     /// Like `get`, but returns the raw body bytes and the Content-Type, for
     /// binary responses (a poster JPEG) that `get`'s lossy-UTF-8 body mangles.
     // Only the macOS-gated poster test needs raw bytes; unused off macOS.
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     fn get_bytes(&self, path: &str) -> (u16, Option<String>, Vec<u8>) {
         let mut stream = TcpStream::connect(("127.0.0.1", self.port))
             .unwrap_or_else(|e| panic!("connect for {path}: {e}"));
@@ -461,7 +461,7 @@ fn the_basemap_archive_is_served_by_byte_range() {
 }
 
 #[test]
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 fn a_sized_video_request_returns_an_oriented_poster_jpeg() {
     // The sized endpoint returns a QuickLook poster image, not the raw video.
     // (The old behavior read the whole file into memory and returned it with the
@@ -499,7 +499,7 @@ fn a_sized_video_request_returns_an_oriented_poster_jpeg() {
 // poster. watch caches 240 and 1200 px but tiles ask for 480, so before this
 // every HEIC tile paid a QuickLook conversion (~0.44 s) on every visit.
 #[test]
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 fn a_heic_tile_the_gallery_converts_is_cached() {
     let lib = TestLibrary::new();
     let dst = lib
@@ -2238,7 +2238,7 @@ fn a_rotation_forgets_the_fingerprint_and_the_pixel_signature() {
 /// A rotated HEIC must never be served from a conversion cached before the
 /// turn: its content key is unchanged, so every `<hash>_` file would still
 /// match. The user never clears a cache by hand.
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 #[test]
 fn a_rotated_heic_is_rendered_again_not_served_from_cache() {
     let (lib, portrait, _) = heic_library();

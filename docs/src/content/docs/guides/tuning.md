@@ -95,4 +95,6 @@ The HEIC and video conversion limit (`--qlmanage-concurrency`, default 6) is
 shared by every videre process on the machine, so running `faces` next to
 `embed`, a gallery or `watch` does not multiply the load on QuickLook: the
 commands take turns within one limit. See
-[running things at once](/guides/long-running-jobs/).
+[running things at once](/guides/long-running-jobs/). On Linux, where HEIC and
+video are decoded inside videre, the same number limits how many decode at once
+in each process.
