@@ -11,7 +11,7 @@ use std::time::Duration;
 /// volume can make `qlmanage`'s own file access block indefinitely on macOS
 /// rather than fail fast, which otherwise freezes the calling command with
 /// no output; this bounds that to a single conversion's worth of waiting.
-const QLMANAGE_TIMEOUT: Duration = Duration::from_secs(20);
+pub(crate) const QLMANAGE_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// Default max `qlmanage` processes running at once, process-wide, unless
 /// overridden via `set_qlmanage_concurrency` (e.g. `videre faces

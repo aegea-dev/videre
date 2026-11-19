@@ -19,6 +19,59 @@ use crate::error_kind::ErrorKind;
 use anyhow::Context as _;
 use image::{imageops::FilterType, DynamicImage};
 use std::io::{Read, Seek, SeekFrom};
+use std::path::Path;
+
+/// A HEIC (`.heic`) or a video's first frame (`.mov`, `.mp4`) as a person
+/// sees it, shrunk to fit `max_size`: the contract of
+/// `heic::decode_via_quicklook`, which calls this where QuickLook is missing.
+pub fn decode(path: &Path, max_size: Option<u32>) -> anyhow::Result<DynamicImage> {
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_lowercase)
+        .unwrap_or_default();
+    let is_heic = match ext.as_str() {
+        "heic" => true,
+        "mov" | "mp4" => false,
+        _ => {
+            return Err(
+                anyhow::anyhow!("{} is not a HEIC or a video", path.display())
+                    .context(ErrorKind::DecodeFailed),
+            )
+        }
+    };
+    // The QuickLook limits apply as they would to qlmanage: at most as many
+    // heavy decodes at once, and the same ceiling, so a dead drive or a stuck
+    // decode is reported as unavailable instead of hanging the caller.
+    let _permit = crate::heic::qlmanage_semaphore().acquire();
+    let owned = path.to_path_buf();
+    let decoded = crate::io_timeout::run_with_timeout(crate::heic::QLMANAGE_TIMEOUT, move || {
+        std::panic::catch_unwind(|| -> anyhow::Result<DynamicImage> {
+            if is_heic {
+                let bytes = std::fs::read(&owned).map_err(crate::error_kind::from_io)?;
+                decode_heic(&bytes)
+            } else {
+                let file = std::fs::File::open(&owned).map_err(crate::error_kind::from_io)?;
+                let len = file.metadata().map_err(crate::error_kind::from_io)?.len();
+                decode_video(std::io::BufReader::new(file), len)
+            }
+        })
+        .unwrap_or_else(|_| {
+            Err(anyhow::anyhow!("decoder panicked").context(ErrorKind::DecodeFailed))
+        })
+    });
+    let img = match decoded {
+        Ok(result) => result,
+        Err(crate::io_timeout::IoRunError::Deadline(limit)) => Err(anyhow::anyhow!(
+            "decoding timed out after {}s (file may be unreachable - is its drive connected?)",
+            limit.as_secs()
+        )
+        .context(ErrorKind::SourceUnavailable)),
+        Err(other) => Err(crate::error_kind::from_io(other.into_io_error())),
+    }
+    .with_context(|| format!("decode {}", path.display()))?;
+    Ok(fit(img, max_size))
+}
 
 /// A HEIC's primary image as a person sees it: `heif-oxide` applies the
 /// container's `clap`, `irot` and `imir` and ignores EXIF Orientation, as
@@ -413,6 +466,42 @@ mod tests {
             wrong > 3.0 * right,
             "a half turn would match as well ({wrong:.1})"
         );
+    }
+
+    /// A fixture copied under a Turkish name, as files in a real library are.
+    fn copied(name: &str, as_name: &str) -> (tempfile::TempDir, std::path::PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(as_name);
+        std::fs::write(&path, fixture(name)).unwrap();
+        (dir, path)
+    }
+
+    #[test]
+    fn decode_reads_a_heic_by_path_and_fits_it() {
+        let (_dir, path) = copied("heic/grid_rot90.heic", "Gökçe_portre.HEIC");
+        assert_eq!(decode(&path, Some(1024)).unwrap().dimensions(), (768, 1024));
+    }
+
+    #[test]
+    fn decode_reads_a_video_by_path() {
+        let (_dir, path) = copied("testsrc_64x32_rot90.mp4", "Işıl_doğum_günü.mov");
+        assert_eq!(decode(&path, None).unwrap().dimensions(), (32, 64));
+    }
+
+    #[test]
+    fn a_missing_file_fails_as_unavailable_not_as_undecodable() {
+        let err = decode(Path::new("/nonexistent/Özgür.heic"), None).unwrap_err();
+        assert_eq!(
+            ErrorKind::in_chain(&err),
+            Some(ErrorKind::SourceUnavailable)
+        );
+    }
+
+    #[test]
+    fn an_unknown_extension_is_refused() {
+        let (_dir, path) = copied("red_1s.mp4", "Gökçe.avi");
+        let err = decode(&path, None).unwrap_err();
+        assert_eq!(ErrorKind::in_chain(&err), Some(ErrorKind::DecodeFailed));
     }
 
     #[test]
