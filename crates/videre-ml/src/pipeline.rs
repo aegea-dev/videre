@@ -977,41 +977,29 @@ pub fn compute_clustering(
 fn load_image(
     path: &str,
     hash: &str,
-    // Only the macOS HEIC branch reads the cache (to reuse a QuickLook decode);
-    // off macOS there is no such branch, so the parameter is unused there.
-    #[cfg_attr(not(target_os = "macos"), allow(unused_variables))] cache: Option<
-        &videre_core::library::CachePaths,
-    >,
+    cache: Option<&videre_core::library::CachePaths>,
 ) -> anyhow::Result<image::DynamicImage> {
     use videre_core::error_kind::from_image;
     if path.to_lowercase().ends_with(".heic") {
-        #[cfg(target_os = "macos")]
-        {
-            // The shared decode-with-cache helper: reads the library's
-            // cached full-resolution original for this hash, renders and
-            // publishes one otherwise. The published entry is a full-res
-            // decode, which detection's bbox coordinates require (see
-            // `run_heic_stage`); publishing here means `videre faces` seeds
-            // the cache too, so the crops the People pages ask for next
-            // never render the photo again. QuickLook does not say why it
-            // failed, so no kind is claimed; the context keeps whatever
-            // cause the decode did report.
-            return videre_core::heic::decode_fullres_cached(
-                std::path::Path::new(path),
-                "faces",
-                cache.map(|c| (c, hash)),
-            )
-            .map_err(|e| {
-                e.context(format!(
-                    "could not read/convert HEIC file {path} (missing, timed out, or unreadable - is its drive connected?)"
-                ))
-            });
-        }
-        #[cfg(not(target_os = "macos"))]
-        return Err(anyhow::anyhow!(
-            "HEIC decoding is only supported on macOS: {path} (hash {hash})"
+        // The shared decode-with-cache helper: reads the library's
+        // cached full-resolution original for this hash, renders and
+        // publishes one otherwise. The published entry is a full-res
+        // decode, which detection's bbox coordinates require (see
+        // `run_heic_stage`); publishing here means `videre faces` seeds
+        // the cache too, so the crops the People pages ask for next
+        // never render the photo again. On macOS QuickLook does not say why
+        // it failed, so no kind is claimed; the context keeps whatever cause
+        // the decode did report (on Linux, `native_decode`'s kind).
+        return videre_core::heic::decode_fullres_cached(
+            std::path::Path::new(path),
+            "faces",
+            cache.map(|c| (c, hash)),
         )
-        .context(videre_core::error_kind::ErrorKind::QuicklookUnavailable));
+        .map_err(|e| {
+            e.context(format!(
+                "could not read/convert HEIC file {path} (missing, timed out, or unreadable - is its drive connected?)"
+            ))
+        });
     }
     let timeout_path = std::path::PathBuf::from(path);
     videre_core::io_timeout::run_with_timeout(

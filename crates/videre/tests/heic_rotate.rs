@@ -1,7 +1,8 @@
-//! QuickLook, which renders every HEIC videre shows or analyses, agrees with
-//! `heif_rotate` about which way a turn goes. The unit tests pin the bytes;
+//! The HEIC decoder (QuickLook on macOS, `native_decode` on Linux), which
+//! renders every HEIC videre shows or analyses, agrees with `heif_rotate`
+//! about which way a turn goes. The unit tests pin the bytes;
 //! this pins what a person then sees.
-#![cfg(target_os = "macos")]
+#![cfg(any(target_os = "macos", target_os = "linux"))]
 
 use image::{DynamicImage, GenericImageView};
 
@@ -90,7 +91,10 @@ fn a_heic_without_irot_renders_turned_once_one_is_added() {
 
     // ImageIO, which Photos and Preview use, opens the rewritten file. (sips
     // reports no orientation for any HEIC, so the EXIF value is checked by
-    // the unit tests instead.)
+    // the unit tests instead.) macOS only: ImageIO is a macOS framework.
+    if !cfg!(target_os = "macos") {
+        return;
+    }
     let out = std::process::Command::new("sips")
         .args(["-g", "pixelWidth"])
         .arg(dir.path().join("ccw.heic"))

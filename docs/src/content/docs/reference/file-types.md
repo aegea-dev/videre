@@ -11,8 +11,8 @@ description: Which file types videre reads, and what it can do with each.
 |---|---|---|---|---|---|
 | jpg, jpeg, tiff | yes | yes | yes | yes | yes |
 | png, gif, webp, bmp | yes | no | yes | yes | yes |
-| heic | yes | yes | macOS only | macOS only | macOS only |
-| mov, mp4 | yes | no | macOS only | no | macOS only |
+| heic | yes | yes | yes | yes | yes |
+| mov, mp4 | yes | no | yes, from one frame | no | yes, from one frame |
 | dng | yes | yes | no | no | no |
 
 Everything is scanned, hashed and exactly de-duplicated regardless. The gaps

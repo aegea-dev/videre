@@ -30,8 +30,8 @@ so two libraries never share cached decodes. Files are named by content hash:
 
 | File | What |
 |---|---|
-| `<hash>_240.jpg` | QuickLook grid thumbnail for HEIC |
-| `<hash>_1200.jpg` | QuickLook lightbox image for HEIC |
+| `<hash>_240.jpg` | Grid thumbnail for HEIC |
+| `<hash>_1200.jpg` | Lightbox image for HEIC |
 | `<hash>_<size>.jpg` | A HEIC at another size, kept the first time the gallery shows it (its tiles ask for 480) |
 | `<hash>_raster-v1_240.jpg` | Orientation-correct grid thumbnail for JPEG and other browser-raster formats |
 | `<hash>_raster-v1_1200.jpg` | Orientation-correct raster lightbox image |

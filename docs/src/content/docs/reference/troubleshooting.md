@@ -94,14 +94,12 @@ videre config set read-rate 5
 
 See [tuning](/guides/tuning/#slow-drives-and-large-files).
 
-## HEIC photos or videos are skipped on Linux
+## Some videos are skipped on Linux
 
-Expected. HEIC and video frames are decoded through a macOS system tool, so on
-Linux those files are skipped for thumbnails, search and face detection. They
-are still scanned, hashed and de-duplicated, so duplicate detection over them
-works normally.
-
-JPEG, PNG and the other common formats work everywhere. See
+Expected for clips that are neither H.264 nor HEVC, such as Dolby Vision or
+Motion JPEG: on Linux videre decodes those two codecs itself, and skips any
+other after two attempts. Skipped videos are still scanned, hashed and
+de-duplicated, so duplicate detection over them works normally. See
 [platform support](/reference/platforms/).
 
 ## A command says the library is busy

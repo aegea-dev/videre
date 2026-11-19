@@ -73,8 +73,8 @@ model; the summary line counts them as fingerprints added.
 | Type | Embedded? |
 |---|---|
 | jpg, png, tiff, webp, bmp, gif | yes |
-| heic | macOS only |
-| mov, mp4 | macOS only, from one frame |
+| heic | yes |
+| mov, mp4 | yes, from one frame |
 | dng | never |
 
 `.dng` is excluded up front rather than attempted and failed, so a library full
@@ -85,8 +85,8 @@ Video embedding uses a single representative frame, not the motion, so video
 search is noticeably weaker than photo search. A clip whose subject appears
 later than its opening frame will not match well.
 
-On Linux, HEIC and video are skipped entirely. See
-[platform support](/reference/platforms/).
+On Linux, a video is embedded from its first keyframe, and only H.264 and HEVC
+clips are decoded. See [platform support](/reference/platforms/).
 
 ## Running more than one model
 

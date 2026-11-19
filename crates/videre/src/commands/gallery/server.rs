@@ -2902,7 +2902,7 @@ fn render_map(
          var GVIEW=\"all\";\nvar PEOPLE_ROOT=\"/people\";\nvar GDATE=null;\nvar GLOC={location_json};\nvar GROUPS=[];\n\
          var STREET_DETAIL={street_detail};",
         has_embeddings,
-        cfg!(target_os = "macos")
+        videre_core::heic::FRAMES_AVAILABLE
     );
     let page = pages::Map {
         settings_script,
