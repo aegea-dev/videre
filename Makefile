@@ -114,6 +114,14 @@ coverage: ## Print per-file unit-test coverage (cargo-llvm-cov)
 coverage-html: ## Generate an HTML coverage report at target/llvm-cov/html/index.html
 	cargo +$(COVERAGE_TOOLCHAIN) llvm-cov --workspace --html
 
+.PHONY: licenses
+licenses: ## Write THIRD_PARTY_LICENSES.md for a release archive (needs cargo-about; TARGET=<triple> for one target)
+	$(CARGO) about generate --locked --fail -c about.toml $(if $(TARGET),--target $(TARGET)) licenses/crates-template.md -o target/crate-licenses.md
+	# videre's own crates are under LICENSE, not third-party.
+	{ cat licenses/notices.md; \
+	  sed 's/^## /### /; s/^# Third-party bundled assets/## Bundled into the gallery/' crates/videre/static/THIRD_PARTY_LICENSES.md; \
+	  echo; grep -v '^- \[videre[ -]' target/crate-licenses.md; } > THIRD_PARTY_LICENSES.md
+
 .PHONY: verify
 verify: fmt-check test docs-build ## Everything CI and a release gate on: formatting, tests, docs
 

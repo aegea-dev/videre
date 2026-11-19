@@ -140,6 +140,7 @@ export default defineConfig({
 						{ label: 'Search models', slug: 'reference/models' },
 						{ label: 'Query syntax', slug: 'reference/query-syntax' },
 						{ label: 'Feedback', slug: 'reference/feedback' },
+						{ label: 'Credits', slug: 'reference/credits' },
 					],
 				},
 			],

@@ -190,11 +190,17 @@ See [CONTRIBUTING.md].
 
 Apache License 2.0. See [LICENSE].
 
+videre is built on many open-source projects: Rust crates, ONNX Runtime,
+SQLite, GeoNames place names and more. Every release archive includes
+`THIRD_PARTY_LICENSES.md` with their licenses; [docs.videre.sh/reference/credits]
+lists the main ones.
+
 [Erhan Gundogan]: https://github.com/erhangundogan
 [docs.videre.sh]: https://docs.videre.sh
 [latest release]: https://github.com/aegea-dev/videre/releases/latest
 [docs.videre.sh/start/install]: https://docs.videre.sh/start/install/
 [docs.videre.sh/reference/query-syntax]: https://docs.videre.sh/reference/query-syntax/
+[docs.videre.sh/reference/credits]: https://docs.videre.sh/reference/credits/
 [docs.videre.sh/start/quickstart]: https://docs.videre.sh/start/quickstart/
 [docs.videre.sh/commands]: https://docs.videre.sh/commands/
 [CONTRIBUTING.md]: CONTRIBUTING.md
