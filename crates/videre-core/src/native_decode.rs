@@ -103,28 +103,29 @@ fn decode_heic(bytes: &[u8]) -> anyhow::Result<DynamicImage> {
 /// The first keyframe of an MP4/MOV's video track, turned as the track's
 /// display matrix says, as 8-bit RGB.
 fn decode_video<R: Read + Seek>(mut reader: R, len: u64) -> anyhow::Result<DynamicImage> {
+    // A first read, so an unreadable file reports its I/O failure rather
+    // than a missing `moov`.
     let mut head = [0u8; 8];
     reader
         .read_exact(&mut head)
+        .and_then(|_| reader.seek(SeekFrom::Start(0)))
         .map_err(crate::error_kind::from_io)?;
-    reader
-        .seek(SeekFrom::Start(0))
-        .map_err(crate::error_kind::from_io)?;
-    // `re_mp4` seeks past `mdat`, so only the boxes it parses are read. It
-    // insists on an `ftyp`, which QuickTime files such as iPhone Live Photo
-    // clips may lack; sample offsets are absolute either way.
-    let mp4 = if &head[4..8] == b"ftyp" {
-        re_mp4::Mp4::read(&mut reader, len)
-    } else {
-        re_mp4::Mp4::read(FtypPrefixed::new(&mut reader), len + FTYP.len() as u64)
-    }
-    .map_err(mp4_error)?;
+    let moov = crate::video_probe::read_moov(&mut reader, len)
+        .context(ErrorKind::DecodeFailed)
+        .context("no readable moov box")?;
+    // `re_mp4` is shown an `ftyp` and this `moov` only: it insists on an
+    // `ftyp`, which iPhone Live Photo clips lack, and it loops forever on a
+    // classic QuickTime `udta` (see `parser_view`). Sample offsets are
+    // absolute in the file, so they still point into `reader`.
+    let mut view = FTYP.to_vec();
+    view.extend(boxed(b"moov", &parser_view(&moov)));
+    let mp4 = re_mp4::Mp4::read_bytes(&view).map_err(mp4_error)?;
     let track = mp4
         .tracks()
         .values()
         .find(|t| t.kind == Some(re_mp4::TrackKind::Video))
         .context(ErrorKind::DecodeFailed)
-        .context("no video track")?;
+        .context("no H.264 or HEVC video track")?;
     let sample = track
         .samples
         .iter()
@@ -181,50 +182,32 @@ fn mp4_error(e: re_mp4::Error) -> anyhow::Error {
     }
 }
 
-/// The `ftyp` given to `re_mp4` for a file without one.
+/// The `ftyp` given to `re_mp4`.
 const FTYP: [u8; 16] = *b"\0\0\0\x10ftypqt  \0\0\0\0";
 
-/// `FTYP` followed by the file, as one stream.
-struct FtypPrefixed<R> {
-    inner: R,
-    pos: u64,
+/// A box of `typ` around `payload`; a `moov` is far below 4 GB
+/// (`video_probe` caps what it reads).
+fn boxed(typ: &[u8; 4], payload: &[u8]) -> Vec<u8> {
+    let mut out = ((payload.len() + 8) as u32).to_be_bytes().to_vec();
+    out.extend_from_slice(typ);
+    out.extend_from_slice(payload);
+    out
 }
 
-impl<R: Seek> FtypPrefixed<R> {
-    fn new(inner: R) -> Self {
-        Self { inner, pos: 0 }
-    }
-}
-
-impl<R: Read + Seek> Read for FtypPrefixed<R> {
-    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        let head = FTYP.len() as u64;
-        if self.pos < head {
-            let rest = &FTYP[self.pos as usize..];
-            let n = rest.len().min(buf.len());
-            buf[..n].copy_from_slice(&rest[..n]);
-            self.pos += n as u64;
-            return Ok(n);
+/// `moov`'s payload without its `udta` and `meta` boxes, at the top and in
+/// each `trak`: user data no frame needs, and where classic QuickTime may end
+/// a list with a 32-bit zero that `re_mp4` reads as a box of size 0 and loops
+/// on forever (older cameras' Motion JPEG and Dolby Vision clips).
+fn parser_view(moov: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(moov.len());
+    for (typ, payload) in crate::video_meta::children(moov) {
+        match &typ {
+            b"udta" | b"meta" => {}
+            b"trak" => out.extend(boxed(b"trak", &parser_view(payload))),
+            _ => out.extend(boxed(&typ, payload)),
         }
-        self.inner.seek(SeekFrom::Start(self.pos - head))?;
-        let n = self.inner.read(buf)?;
-        self.pos += n as u64;
-        Ok(n)
     }
-}
-
-impl<R: Seek> Seek for FtypPrefixed<R> {
-    fn seek(&mut self, to: SeekFrom) -> std::io::Result<u64> {
-        let head = FTYP.len() as u64;
-        self.pos = match to {
-            SeekFrom::Start(n) => n,
-            SeekFrom::Current(d) => self.pos.saturating_add_signed(d),
-            SeekFrom::End(d) => {
-                (self.inner.seek(SeekFrom::End(0))? + head).saturating_add_signed(d)
-            }
-        };
-        Ok(self.pos)
-    }
+    out
 }
 
 /// Length-prefixed NAL units, as MP4 stores them.
@@ -432,6 +415,57 @@ mod tests {
         assert_eq!(video(bytes).unwrap().dimensions(), (64, 64));
     }
 
+    fn bx(typ: &[u8; 4], payload: &[u8]) -> Vec<u8> {
+        let mut v = ((payload.len() + 8) as u32).to_be_bytes().to_vec();
+        v.extend_from_slice(typ);
+        v.extend_from_slice(payload);
+        v
+    }
+
+    /// Classic QuickTime may end a `udta` list with a 32-bit zero, as older
+    /// cameras' Motion JPEG and Dolby Vision clips do. `re_mp4` reads it as a
+    /// box of size 0 and loops forever when another box follows, so it is
+    /// never shown `udta`.
+    #[test]
+    fn a_quicktime_udta_terminator_does_not_hang() {
+        let mut bytes = fixture("red_1s.mp4");
+        // Retype the original moov `free` (every offset stays valid) and
+        // append a copy carrying the terminated udta, then one more box.
+        let mut at = 0;
+        let moov = loop {
+            let size = u32::from_be_bytes(bytes[at..at + 4].try_into().unwrap()) as usize;
+            if &bytes[at + 4..at + 8] == b"moov" {
+                break at..at + size;
+            }
+            at += size;
+        };
+        let mut payload = bytes[moov.start + 8..moov.end].to_vec();
+        let mut udta = bx(b"\xa9cmt", b"\0\x0a\0\0Gokce cam");
+        udta.extend_from_slice(&[0, 0, 0, 0]);
+        payload.extend(bx(b"udta", &udta));
+        bytes[moov.start + 4..moov.start + 8].copy_from_slice(b"free");
+        bytes.extend(bx(b"moov", &payload));
+        bytes.extend(bx(b"free", &[0; 8]));
+        let start = std::time::Instant::now();
+        assert_eq!(video(bytes).unwrap().dimensions(), (64, 64));
+        assert!(start.elapsed() < std::time::Duration::from_secs(2));
+    }
+
+    /// A codec neither decoder reads (Motion JPEG, Dolby Vision `dmb1`) is
+    /// refused at once as undecodable.
+    #[test]
+    fn an_unsupported_codec_is_refused_at_once() {
+        let mut bytes = fixture("red_1s.mp4");
+        // The sample entry's type, after `stsd` (`ftyp` lists avc1 as a brand).
+        let stsd = bytes.windows(4).position(|w| w == b"stsd").unwrap();
+        let at = stsd + bytes[stsd..].windows(4).position(|w| w == b"avc1").unwrap();
+        bytes[at..at + 4].copy_from_slice(b"jpeg");
+        let start = std::time::Instant::now();
+        let err = video(bytes).unwrap_err();
+        assert_eq!(ErrorKind::in_chain(&err), Some(ErrorKind::DecodeFailed));
+        assert!(start.elapsed() < std::time::Duration::from_secs(2));
+    }
+
     #[test]
     fn an_audio_only_video_fails_as_a_decode_failure() {
         let err = video(fixture("audio_only.mov")).unwrap_err();
@@ -502,6 +536,48 @@ mod tests {
         let (_dir, path) = copied("red_1s.mp4", "Gökçe.avi");
         let err = decode(&path, None).unwrap_err();
         assert_eq!(ErrorKind::in_chain(&err), Some(ErrorKind::DecodeFailed));
+    }
+
+    /// Every HEIC, MOV and MP4 under `VIDERE_NATIVE_DECODE_DIR`, decoded, for
+    /// checking this backend (or its replacement) against a real folder by
+    /// hand, read-only:
+    /// `VIDERE_NATIVE_DECODE_DIR=<dir> cargo test -p videre-core native_decode -- --ignored`
+    #[test]
+    #[ignore]
+    fn decodes_every_file_in_a_real_folder() {
+        fn walk(dir: &Path, out: &mut Vec<std::path::PathBuf>) {
+            for entry in std::fs::read_dir(dir).unwrap().flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    walk(&path, out);
+                } else if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+                    if ["heic", "mov", "mp4"].contains(&ext.to_lowercase().as_str()) {
+                        out.push(path);
+                    }
+                }
+            }
+        }
+        let dir = std::env::var("VIDERE_NATIVE_DECODE_DIR").expect("VIDERE_NATIVE_DECODE_DIR");
+        let mut files = Vec::new();
+        walk(Path::new(&dir), &mut files);
+        let mut failed = Vec::new();
+        for path in &files {
+            if let Err(e) = decode(path, Some(1024)) {
+                failed.push(format!(
+                    "{:?} {}: {e:#}",
+                    ErrorKind::in_chain(&e),
+                    path.display()
+                ));
+            }
+        }
+        eprintln!("decoded {} of {}", files.len() - failed.len(), files.len());
+        for line in &failed {
+            eprintln!("  {line}");
+        }
+        assert!(
+            failed.iter().all(|l| l.starts_with("Some(DecodeFailed)")),
+            "a failure other than an undecodable file"
+        );
     }
 
     #[test]
