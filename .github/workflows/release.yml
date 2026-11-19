@@ -116,13 +116,23 @@ jobs:
             "$bin" completion "$shell" > "videre.$shell"
           done
 
+      # The notices for everything compiled into this target's binary: crates
+      # differ per target (macOS-only Cocoa bindings, the Linux freedesktop
+      # trash), so each archive gets its own. `--fail` stops the release on
+      # a crate whose license about.toml does not accept.
+      - name: Generate third-party license notices
+        shell: bash
+        run: |
+          cargo install --locked cargo-about@0.9.3
+          make licenses TARGET=${{ matrix.target }}
+
       - uses: taiki-e/upload-rust-binary-action@f0d45ae91ee7b8ee928de7a9d04d893a08bcbec6 # v1.30.2
         with:
           bin: videre
           target: ${{ matrix.target }}
           archive: $bin-$tag-$target
           checksum: sha256
-          include: videre.bash,videre.zsh,videre.fish
+          include: videre.bash,videre.zsh,videre.fish,LICENSE,THIRD_PARTY_LICENSES.md
           token: ${{ secrets.GITHUB_TOKEN }}
 
       # Proof the artifact is self-contained. macOS was measured before this
