@@ -100,6 +100,40 @@ pub fn keys<F: Read + Seek>(file: &mut F, len: u64, format: Option<Format>) -> i
     })
 }
 
+/// A metadata span larger than this is skipped by [`metadata`]: no embedded
+/// packet is near it in size, and reading it whole is what [`metadata`] exists
+/// to avoid. A two-hour video's `moov` is a few tens of megabytes.
+const METADATA_SPAN_CAP: u64 = 64 << 20;
+
+/// The bytes of `file`'s metadata spans, in the order [`keys`] hashes them:
+/// everything an embedded XMP packet, EXIF block or the like can sit in,
+/// read without touching the content. `None` when the format is unknown or
+/// does not parse, as for [`keys`].
+pub fn metadata<F: Read + Seek>(
+    file: &mut F,
+    len: u64,
+    format: Option<Format>,
+) -> io::Result<Option<Vec<u8>>> {
+    let Some(spans) = format.and_then(|format| spans(format, file, len)) else {
+        return Ok(None);
+    };
+    let mut out = Vec::new();
+    for span in spans {
+        let Span::Meta(range) = span else { continue };
+        if range.start > range.end || range.end > len {
+            return Ok(None);
+        }
+        if range.end - range.start > METADATA_SPAN_CAP {
+            continue;
+        }
+        file.seek(SeekFrom::Start(range.start))?;
+        (&mut *file)
+            .take(range.end - range.start)
+            .read_to_end(&mut out)?;
+    }
+    Ok(Some(out))
+}
+
 fn spans<F: Read + Seek>(format: Format, f: &mut F, len: u64) -> Option<Vec<Span>> {
     match format {
         Format::Jpeg => jpeg(f, len),
