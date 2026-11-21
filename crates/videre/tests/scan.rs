@@ -9,6 +9,53 @@ fn scan(library: &TestLibrary, args: &[&str]) -> std::process::Output {
 }
 
 #[test]
+fn scan_excludes_appledouble_by_content_and_leaves_files_untouched() {
+    let library = TestLibrary::new();
+    library.copy_fixture("tiny.jpg", "çiçek.jpg");
+    library.copy_fixture("tiny.jpg", "._gerçek.jpg");
+    let root = library.context().paths.root;
+    let sidecars = [root.join("._çiçek.jpg"), root.join("metaveri.jpg")];
+    let metadata = common::appledouble_bytes();
+    let expected: std::collections::BTreeSet<String> = ["çiçek.jpg", "._gerçek.jpg"]
+        .into_iter()
+        .map(str::to_owned)
+        .collect();
+
+    for pass in 0..2 {
+        for path in &sidecars {
+            if pass == 1 {
+                std::fs::remove_file(path).unwrap();
+            }
+            std::fs::write(path, &metadata).unwrap();
+        }
+        let output = scan(&library, &["--silent"]);
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let names: std::collections::BTreeSet<String> = library
+            .conn()
+            .prepare("SELECT path FROM file_hashes")
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(0))
+            .unwrap()
+            .map(|row| {
+                std::path::Path::new(&row.unwrap())
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .collect();
+        assert_eq!(names, expected);
+        for path in &sidecars {
+            assert_eq!(std::fs::read(path).unwrap(), metadata);
+        }
+    }
+}
+
+#[test]
 fn scan_writes_local_records_with_correct_hashes() {
     let library = TestLibrary::new();
     let path = library.copy_fixture("tiny.jpg", "nested/image.jpg");
