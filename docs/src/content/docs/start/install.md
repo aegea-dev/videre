@@ -102,6 +102,9 @@ and put it on your `PATH`. No Rust toolchain needed, nothing to compile.
 | Linux x86_64 | `videre-<version>-x86_64-unknown-linux-gnu.tar.gz` |
 | Linux ARM64 | `videre-<version>-aarch64-unknown-linux-gnu.tar.gz` |
 
+The Linux binaries need glibc 2.39 or newer (Debian 13, Ubuntu 24.04 and
+later); see [platform support](/reference/platforms/#linux-distributions).
+
 ```bash
 tar xzf videre-*-aarch64-apple-darwin.tar.gz
 ./videre --version
