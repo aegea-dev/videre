@@ -73,8 +73,16 @@ jobs:
           # is retiring that image, and asking for a dead label does not fail
           # fast: the job queued for 10 hours without running a step. Hence the
           # timeout below.)
+          # Linux builds on a pinned Ubuntu on purpose: a binary needs the glibc
+          # it was linked against or newer. 0.65.0 was built on `ubuntu-latest`
+          # (glibc 2.43) and would not start on Debian 13 or Ubuntu 24.04.
+          # 24.04 (glibc 2.39) is the oldest that links: the prebuilt ONNX
+          # Runtime that ort-sys supplies needs GCC 14's libstdc++
+          # (`__cxa_call_terminate`) and C23 glibc symbols, so an Ubuntu 22.04
+          # build fails at the link. The "Check the glibc floor" step below
+          # enforces it.
           - target: x86_64-unknown-linux-gnu
-            os: ubuntu-latest
+            os: ubuntu-24.04
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-24.04-arm
     runs-on: ${{ matrix.os }}
@@ -107,6 +115,20 @@ jobs:
       - name: Build the release binary
         shell: bash
         run: cargo build --release --target ${{ matrix.target }}
+
+      # The newest glibc symbol version the binary asks for must not exceed
+      # the floor, or it fails to start on older distributions with "version
+      # `GLIBC_2.xx' not found". Raising it is a decision, not a side effect
+      # of a runner image update.
+      - name: Check the glibc floor
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          floor=39
+          bin="target/${{ matrix.target }}/release/videre"
+          newest=$(objdump -T "$bin" | grep -o 'GLIBC_2\.[0-9]*' | cut -d. -f2 | sort -n | tail -1)
+          echo "needs glibc 2.$newest (floor 2.$floor)"
+          test "$newest" -le "$floor"
 
       - name: Generate shell completion scripts
         shell: bash
@@ -200,9 +222,7 @@ jobs:
       # the checked-out tree: the fixtures are copied into it, never scanned in
       # place.
       #
-      # Asserts the exit code and a non-zero file count, not an exact count:
-      # Linux skips HEIC and video frames, so counts legitimately differ by
-      # platform.
+      # Asserts the exit code and a non-zero file count, not an exact count.
       - name: Run it
         shell: bash
         run: |
@@ -218,6 +238,17 @@ jobs:
           test "$n" -gt 0
           test -f "$library/.videre/hashes.db"
           test ! -e crates/videre/tests/fixtures/.videre
+
+      # The runner is newer than the glibc floor, so prove the binary starts
+      # on the oldest distributions it promises to run on.
+      - name: Run it on the oldest supported distributions
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -eux
+          for image in debian:13 ubuntu:24.04; do
+            docker run --rm -v "$PWD:/w:ro" "$image" /w/videre --version
+          done
 
   # The gate. Only a release whose artifacts have been downloaded onto a clean
   # runner and actually executed becomes visible. If smoke fails, the draft

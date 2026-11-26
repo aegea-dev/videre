@@ -19,6 +19,18 @@ and runs on Linux, where HEIC and video are decoded differently.
 | HEIC and video scanning, hashing, EXIF | yes | yes |
 | File creation time | yes | always empty |
 
+## Linux distributions
+
+The Linux release binaries need glibc 2.39 or newer: Debian 13, Ubuntu 24.04,
+Fedora 40 or later, Arch Linux and Omarchy, and other current distributions.
+Debian 12 and Ubuntu 22.04 are too old for them. Alpine and other musl-based
+distributions are not supported yet.
+
+On an older glibc the binary stops at once with a message such as
+``version `GLIBC_2.39' not found``. Building from source does not help there:
+the prebuilt ONNX Runtime library that face detection links needs a newer C++
+runtime than those distributions ship.
+
 ## Intel Macs are not supported
 
 The ONNX Runtime dependency ships no prebuilt binaries for
