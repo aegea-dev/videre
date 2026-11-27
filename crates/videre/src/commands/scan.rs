@@ -96,8 +96,16 @@ fn run_inner(args: &ScanArgs, ctx: &CommandContext) -> anyhow::Result<ScanJson> 
 
     let (records, skipped) =
         videre_core::pipeline_runs::track_in(&conn, &ctx.library, &guard, "scan", || {
-            let (records, skipped, _walked) = gather_records(args, ctx, &conn);
-            sqlite_output::write_records_in(&conn, &ctx.library, &records)?;
+            let gathered = gather_records(args, ctx, &conn)?;
+            sqlite_output::write_scan_in(
+                &conn,
+                &ctx.library,
+                &gathered.batch.records,
+                &gathered.batch.ignored,
+            )?;
+            videre_core::ignored_files::retain_seen(&conn, &gathered.seen)?;
+            let records = gathered.batch.records;
+            let skipped = gathered.skipped;
             // Rows written before capture dates get theirs from what they
             // already hold; nothing is hashed again.
             let resolved = sqlite_output::resolve_unresolved(&conn)?;
@@ -142,28 +150,30 @@ fn run_inner(args: &ScanArgs, ctx: &CommandContext) -> anyhow::Result<ScanJson> 
     })
 }
 
+struct GatheredRecords {
+    batch: crate::indexing::IndexBatch,
+    skipped: usize,
+    seen: std::collections::HashSet<String>,
+}
+
 fn gather_records(
     args: &ScanArgs,
     ctx: &CommandContext,
     conn: &Connection,
-) -> (Vec<videre::types::FileRecord>, usize, usize) {
+) -> anyhow::Result<GatheredRecords> {
     // Incremental by default: skip a file whose row is already current. `--force`
     // loads no signatures, so everything is reprocessed. A file the walk sees
     // but cannot stat, and any new path, falls through to the hash path.
-    let sigs = if args.force {
-        std::collections::HashMap::new()
-    } else {
-        videre_core::db::stored_signatures(conn).unwrap_or_default()
-    };
     let all_paths = scanner::scan(&ctx.library.paths.root);
-    let walked = all_paths.len();
-    let paths: Vec<_> = all_paths
-        .into_iter()
-        .filter(|path| videre::incremental::needs_processing(&sigs, path))
+    let seen = all_paths
+        .iter()
+        .map(|path| path.to_string_lossy().into_owned())
         .collect();
+    let candidates = videre::incremental::candidates(conn, all_paths, args.force)?;
+    let paths = candidates.paths;
     let progress = videre_core::progress::Progress::new(paths.len() as u64, args.silent);
 
-    let records: Vec<_> = paths
+    let files = paths
         .par_iter()
         .filter_map(|path| {
             // Tracked while it hashes, so a large file shows its bytes beside
@@ -176,15 +186,24 @@ fn gather_records(
             let tracked = progress.track(&name, handle.clone());
             let hashed = hasher::hash_file_in_observed(&ctx.library, path, &handle);
             drop(tracked);
-            let result = record_or_skip(hashed, &progress, &path.display().to_string());
+            let result = record_or_skip(
+                crate::indexing::classify(hashed),
+                &progress,
+                &path.display().to_string(),
+            );
             progress.tick();
             result
         })
         .collect();
     progress.finish();
-    let skipped = paths.len() - records.len();
+    let batch = crate::indexing::IndexBatch::from_files(files);
+    let skipped = candidates.ignored + paths.len() - batch.records.len();
 
-    (records, skipped, walked)
+    Ok(GatheredRecords {
+        batch,
+        skipped,
+        seen,
+    })
 }
 
 fn record_or_skip<T>(
@@ -194,7 +213,6 @@ fn record_or_skip<T>(
 ) -> Option<T> {
     match result {
         Ok(record) => Some(record),
-        Err(error) if hasher::is_appledouble_error(&error) => None,
         Err(error) => {
             progress.skip(path, videre_core::error_kind::from_io(error));
             None

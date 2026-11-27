@@ -7,7 +7,7 @@ use std::path::Path;
 use std::time::SystemTime;
 
 #[derive(Debug)]
-struct AppleDoubleMetadata;
+struct AppleDoubleMetadata(videre_core::ignored_files::IgnoredFile);
 
 enum AppleDoublePolicy {
     Ignore,
@@ -22,12 +22,13 @@ impl std::fmt::Display for AppleDoubleMetadata {
 
 impl std::error::Error for AppleDoubleMetadata {}
 
-/// Known AppleDouble metadata is an intentional exclusion, not an unreadable
-/// image. Indexing callers can skip it without reporting an I/O failure.
-pub fn is_appledouble_error(error: &io::Error) -> bool {
+/// Return a content exclusion with the stamps captured from the same opened
+/// file as its header. Callers must not stat the path again to cache it.
+pub fn ignored_file(error: &io::Error) -> Option<&videre_core::ignored_files::IgnoredFile> {
     error
         .get_ref()
-        .is_some_and(|cause| cause.is::<AppleDoubleMetadata>())
+        .and_then(|cause| cause.downcast_ref::<AppleDoubleMetadata>())
+        .map(|cause| &cause.0)
 }
 
 #[derive(Default)]
@@ -265,7 +266,12 @@ fn hash_open_file(
         if crate::appledouble::is_header(&head, size_bytes) {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                AppleDoubleMetadata,
+                AppleDoubleMetadata(videre_core::ignored_files::IgnoredFile {
+                    path: path.to_string_lossy().into_owned(),
+                    size_bytes,
+                    modified_at,
+                    reason: videre_core::ignored_files::APPLEDOUBLE.to_owned(),
+                }),
             ));
         }
     }

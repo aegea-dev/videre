@@ -101,6 +101,12 @@ without their modification time changing (rare, but some tools preserve mtime).
 A file whose bytes were read but whose type could not be identified gets an
 explicit sentinel, so it counts as complete and is not re-read on every scan.
 
+Recognised [AppleDouble metadata](/reference/file-types/#file-type-detection)
+is remembered separately from the media files. An unchanged AppleDouble file
+costs only a `stat` on later scans and watch passes, and still counts as skipped
+in the scan summary. A size or modification-time change makes videre check it
+again; `--force` bypasses the remembered result too.
+
 ## Reading marks from XMP
 
 Scan reads ratings, colour labels, and keywords from an adjacent XMP sidecar and

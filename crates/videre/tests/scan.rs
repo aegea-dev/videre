@@ -1,5 +1,10 @@
 mod common;
 
+#[path = "common/scan.rs"]
+mod scan_helpers;
+
+use std::time::Duration;
+
 use common::{permissions_are_enforced, stderr_without_library_noise, TestLibrary};
 use rusqlite::OptionalExtension;
 
@@ -15,7 +20,7 @@ fn scan_excludes_appledouble_by_content_and_leaves_files_untouched() {
     library.copy_fixture("tiny.jpg", "._gerçek.jpg");
     let root = library.context().paths.root;
     let sidecars = [root.join("._çiçek.jpg"), root.join("metaveri.jpg")];
-    let metadata = common::appledouble_bytes();
+    let metadata = common::files::appledouble_bytes();
     let expected: std::collections::BTreeSet<String> = ["çiçek.jpg", "._gerçek.jpg"]
         .into_iter()
         .map(str::to_owned)
@@ -52,6 +57,91 @@ fn scan_excludes_appledouble_by_content_and_leaves_files_untouched() {
             assert_eq!(std::fs::read(path).unwrap(), metadata);
         }
     }
+}
+
+#[test]
+fn unchanged_appledouble_counts_as_skipped() {
+    let lib = TestLibrary::new();
+    let file = lib.appledouble("._çiçek.jpg").write();
+    lib.scan_ok();
+    lib.assert_ignored(&file);
+
+    lib.scan_ok().assert_written(0).assert_skipped(1);
+    lib.assert_not_indexed(&file);
+}
+
+#[test]
+fn changed_size_invalidates_cached_classification() {
+    let lib = TestLibrary::new();
+    let file = lib.appledouble("._çiçek.jpg").write();
+    lib.scan_ok();
+
+    lib.photo(file.name())
+        .with_meta(file.meta())
+        .with_size(file.size() + 1)
+        .write();
+    lib.scan_ok();
+
+    lib.assert_photo(&file);
+    lib.assert_not_ignored(&file);
+}
+
+#[test]
+fn changed_mtime_invalidates_cached_classification() {
+    let lib = TestLibrary::new();
+    let file = lib.appledouble("._çiçek.jpg").write();
+    lib.scan_ok();
+
+    lib.photo(file.name())
+        .with_meta(file.meta())
+        .with_mtime(file.mtime() + Duration::from_secs(2))
+        .write();
+    lib.scan_ok();
+
+    lib.assert_photo(&file);
+    lib.assert_not_ignored(&file);
+}
+
+#[test]
+fn force_overrides_cached_classification() {
+    let lib = TestLibrary::new();
+    let file = lib.appledouble("._çiçek.jpg").write();
+    lib.scan_ok();
+    lib.assert_ignored(&file);
+
+    lib.photo(file.name()).with_meta(file.meta()).write();
+    lib.scan_ok().assert_written(0).assert_skipped(1);
+    lib.assert_not_indexed(&file);
+
+    lib.scan_force_ok();
+    lib.assert_photo(&file);
+    lib.assert_not_ignored(&file);
+}
+
+#[test]
+fn vanished_file_loses_its_cached_classification() {
+    let lib = TestLibrary::new();
+    let file = lib.appledouble("._çiçek.jpg").write();
+    lib.scan_ok();
+    lib.assert_ignored(&file);
+
+    file.remove();
+    lib.scan_ok();
+
+    lib.assert_not_ignored(&file);
+}
+
+#[test]
+fn scan_recreates_an_absent_ignored_files_cache() {
+    let lib = TestLibrary::new();
+    let file = lib.photo("çiçek.jpg").write();
+    lib.scan_ok();
+    lib.drop_ignore_cache();
+
+    lib.scan_ok();
+
+    lib.assert_photo(&file);
+    lib.assert_ignore_cache_empty();
 }
 
 #[test]

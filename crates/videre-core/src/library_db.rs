@@ -195,6 +195,9 @@ pub fn ensure_scan_schema(conn: &Connection) -> rusqlite::Result<()> {
     add_missing_columns(conn, "file_hashes", FILE_HASHES_COLUMNS)?;
     ensure_hash_index(conn)?;
     ensure_capture_date_index(conn)?;
+    // Optional cache: its absence must not make an otherwise current library
+    // unreadable or require a schema-version upgrade.
+    crate::ignored_files::ensure_table(conn)?;
     // The declared location-cluster key needs its parent table to exist
     // before any row is written, including through standalone scan writers
     // that never run the full schema preparation.

@@ -39,8 +39,12 @@ macOS writes AppleDouble metadata files (`._photo.jpg`) beside the originals on
 volumes that cannot store extended attributes, such as exFAT. videre recognises
 them by their contents, not their name, and leaves them out of the library, so
 a real photo that happens to be named `._something.jpg` is still scanned.
-Recognised AppleDouble files are skipped after reading their 26-byte header
-and count as skipped in the scan summary.
+The first scan reads only their 26-byte header. The result is remembered
+separately from the media index: subsequent scan and watch passes check only
+the file's size and modification time. A change to either makes videre check
+the contents again; `scan --force` rechecks them even if both are unchanged.
+Both newly recognised and unchanged AppleDouble files count as skipped in the
+scan summary.
 
 Rows recorded by an earlier version stay in the database;
 [`prune`](/commands/prune/) does not remove them, because it only drops a row
