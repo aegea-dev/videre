@@ -43,6 +43,20 @@ no prebuilt binaries available for target x86_64-apple-darwin
 This is not a packaging problem and cannot be worked around by building it
 yourself: `cargo install videre` fails identically on an Intel Mac.
 
+## Volumes without no-replace rename
+
+videre creates a library's database in a temporary file and renames it into
+place without replacing anything. Some volumes, such as exFAT drives on macOS,
+do not support that rename. On those, videre reserves the database name first
+and renames the finished build over the reservation. This fallback also handles
+`EINVAL` on Linux, which a filesystem can return when it does not support
+no-replace rename.
+
+The initialization locks keep other videre processes out while this happens.
+A program that ignores them and writes to the reserved file in that moment
+could have its data overwritten, which the native rename would have refused.
+This only matters while a library is first created.
+
 ## HEIC and video on Linux
 
 macOS decodes HEIC images and video frames through QuickLook. Linux has no
