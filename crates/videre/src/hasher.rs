@@ -6,6 +6,30 @@ use std::io::{self, BufReader, Read, Seek, SeekFrom};
 use std::path::Path;
 use std::time::SystemTime;
 
+#[derive(Debug)]
+struct AppleDoubleMetadata;
+
+enum AppleDoublePolicy {
+    Ignore,
+    Hash,
+}
+
+impl std::fmt::Display for AppleDoubleMetadata {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("AppleDouble metadata is not a media file")
+    }
+}
+
+impl std::error::Error for AppleDoubleMetadata {}
+
+/// Known AppleDouble metadata is an intentional exclusion, not an unreadable
+/// image. Indexing callers can skip it without reporting an I/O failure.
+pub fn is_appledouble_error(error: &io::Error) -> bool {
+    error
+        .get_ref()
+        .is_some_and(|cause| cause.is::<AppleDoubleMetadata>())
+}
+
 #[derive(Default)]
 struct ExifData {
     exif_date: Option<String>,
@@ -164,6 +188,8 @@ fn extract_exif(path: &Path) -> ExifData {
 /// point (which can block `fs::metadata`/`File::open`/`read` indefinitely on
 /// macOS rather than fail fast) turns into a returned error instead of
 /// hanging the scan forever on one file.
+/// This unfiltered path also verifies files trashed by older versions, even
+/// when indexing would now exclude them as AppleDouble metadata.
 pub fn hash_file(path: &Path) -> io::Result<FileRecord> {
     // Preserve the bounded, stat-first guard before opening a possibly stale
     // mount. The file size no longer sets a total hashing deadline.
@@ -177,13 +203,14 @@ pub fn hash_file(path: &Path) -> io::Result<FileRecord> {
         videre_core::io_timeout::DEFAULT_IO_TIMEOUT,
         move |progress| {
             let file = File::open(&owned)?;
-            hash_open_file(&owned, file, &progress)
+            hash_open_file(&owned, file, &progress, AppleDoublePolicy::Hash)
         },
     )
     .map_err(videre_core::io_timeout::IoRunError::into_io_error)?
 }
 
-/// Hash one original through the selected library's pinned I/O boundary.
+/// Hash one original through the selected library's pinned I/O boundary,
+/// excluding AppleDouble metadata before hashing its contents.
 pub fn hash_file_in(
     ctx: &videre_core::library::LibraryContext,
     path: &Path,
@@ -208,7 +235,7 @@ pub fn hash_file_in_observed(
     videre_core::io_timeout::run_with_progress_timeout_on(
         progress.clone(),
         videre_core::io_timeout::DEFAULT_IO_TIMEOUT,
-        move |progress| hash_open_file(&owned, file, &progress),
+        move |progress| hash_open_file(&owned, file, &progress, AppleDoublePolicy::Ignore),
     )
     .map_err(videre_core::io_timeout::IoRunError::into_io_error)?
 }
@@ -217,6 +244,7 @@ fn hash_open_file(
     path: &Path,
     file: File,
     progress: &videre_core::io_timeout::ProgressHandle,
+    appledouble_policy: AppleDoublePolicy,
 ) -> io::Result<FileRecord> {
     let metadata = file.metadata()?;
     let size_bytes = metadata.len();
@@ -224,11 +252,27 @@ fn hash_open_file(
     let created_at = metadata.created().ok().map(system_time_to_iso);
     let modified_at = metadata.modified().ok().map(system_time_to_iso);
 
+    let mut reader = progress.wrap(file.try_clone()?);
+    let mut head = Vec::new();
+    if matches!(appledouble_policy, AppleDoublePolicy::Ignore) {
+        // Probe just the fixed header before allocating and reading the
+        // larger type-detection buffer. Preserve these bytes for that buffer
+        // when the file is not AppleDouble.
+        reader
+            .by_ref()
+            .take(crate::appledouble::HEADER_LEN as u64)
+            .read_to_end(&mut head)?;
+        if crate::appledouble::is_header(&head, size_bytes) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                AppleDoubleMetadata,
+            ));
+        }
+    }
     // The first bytes identify the type; the content key is then computed
     // with that type's metadata left out (see `content_key`).
-    let mut reader = progress.wrap(file.try_clone()?);
-    let mut head = vec![0u8; 65536];
-    let mut read = 0;
+    let mut read = head.len();
+    head.resize(65536, 0);
     while read < head.len() {
         let n = reader.read(&mut head[read..])?;
         if n == 0 {
@@ -429,6 +473,26 @@ mod tests {
             assert_eq!(confined.hash, expected.content, "{relative}");
             assert_eq!(confined.meta_hash, expected.meta, "{relative}");
         }
+    }
+
+    #[test]
+    fn indexing_reads_only_the_appledouble_header() {
+        let library_dir = tempdir().unwrap();
+        let root = library_dir.path().join("fotoğraflar");
+        fs::create_dir(&root).unwrap();
+        let library =
+            videre_core::library::LibraryContext::new(&root, &library_dir.path().join("cache"))
+                .unwrap();
+        let path = root.join("._çiçek.jpg");
+        let mut metadata = vec![0; 128 * 1024];
+        metadata[..8].copy_from_slice(b"\x00\x05\x16\x07\x00\x02\x00\x00");
+        fs::write(&path, metadata).unwrap();
+        let handle = videre_core::io_timeout::ProgressHandle::new();
+
+        let result = hash_file_in_observed(&library, &path, &handle);
+
+        assert_eq!(handle.snapshot().bytes, 26);
+        assert_eq!(result.unwrap_err().kind(), io::ErrorKind::InvalidData);
     }
 
     #[test]

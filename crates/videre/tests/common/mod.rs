@@ -23,6 +23,20 @@ pub mod model_test_support {
 
 use std::path::{Path, PathBuf};
 
+/// AppleDouble v2 with one 32-byte Finder-info entry.
+pub fn appledouble_bytes() -> Vec<u8> {
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(&0x0005_1607u32.to_be_bytes());
+    bytes.extend_from_slice(&0x0002_0000u32.to_be_bytes());
+    bytes.extend_from_slice(&[0; 16]);
+    bytes.extend_from_slice(&1u16.to_be_bytes());
+    bytes.extend_from_slice(&9u32.to_be_bytes());
+    bytes.extend_from_slice(&38u32.to_be_bytes());
+    bytes.extend_from_slice(&32u32.to_be_bytes());
+    bytes.extend_from_slice(&[0; 32]);
+    bytes
+}
+
 /// Path to the `videre` binary under test.
 ///
 /// Isolation is per-library, not per-home: videre resolves the library from

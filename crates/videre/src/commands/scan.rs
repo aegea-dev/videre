@@ -194,6 +194,7 @@ fn record_or_skip<T>(
 ) -> Option<T> {
     match result {
         Ok(record) => Some(record),
+        Err(error) if hasher::is_appledouble_error(&error) => None,
         Err(error) => {
             progress.skip(path, videre_core::error_kind::from_io(error));
             None

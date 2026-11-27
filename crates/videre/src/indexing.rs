@@ -62,6 +62,14 @@ mod tests {
         path
     }
 
+    fn appledouble(root: &Path, name: &str) -> PathBuf {
+        let path = root.join(name);
+        let mut metadata = [0; 26];
+        metadata[..8].copy_from_slice(b"\x00\x05\x16\x07\x00\x02\x00\x00");
+        std::fs::write(&path, metadata).unwrap();
+        path
+    }
+
     fn assert_indexed_paths(conn: &rusqlite::Connection, expected: &[PathBuf]) {
         let stored: Vec<String> = conn
             .prepare("SELECT path FROM file_hashes ORDER BY path")
@@ -76,6 +84,29 @@ mod tests {
             .collect();
         expected.sort();
         assert_eq!(stored, expected);
+    }
+
+    #[test]
+    fn event_indexing_excludes_appledouble_but_keeps_a_real_dot_underscore_photo() {
+        let (_temp, library, conn) = test_library();
+        let root = &library.paths.root;
+        let normal = photo(root, "çiçek.jpg");
+        let real = photo(root, "._gerçek.jpg");
+        let sidecar = appledouble(root, "._çiçek.jpg");
+        let renamed = appledouble(root, "metaveri.jpg");
+
+        let written = index_paths(
+            &conn,
+            &library,
+            vec![normal.clone(), sidecar, real.clone(), renamed],
+            videre_core::marks::XmpPrecedence::Db,
+            true,
+        )
+        .unwrap();
+
+        let expected = [normal, real];
+        assert_eq!(written, expected);
+        assert_indexed_paths(&conn, &expected);
     }
 
     #[test]
