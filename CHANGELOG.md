@@ -16,7 +16,7 @@ version number and are released together.
 ## [Unreleased]
 
 
-## [0.65.1] - 2026-11-27
+## [0.65.1] - 2026-11-28
 
 ### Fixed
 
@@ -26,6 +26,20 @@ version number and are released together.
   there. videre now reserves the database name first and renames the finished
   build over it; Linux filesystems that report the same limit as `EINVAL` are
   handled too. See [platform support](https://docs.videre.sh/reference/platforms/).
+- **AppleDouble files are no longer indexed.** macOS writes a `._photo.jpg`
+  metadata file beside every original on volumes such as exFAT, and `scan` and
+  `watch` recorded them as photos: they showed up in counts, waited for `embed`
+  and `faces`, and `dedupe` offered them as copies to remove. videre now
+  recognises them by their contents, not their name, so a real photo named
+  `._something.jpg` is still scanned, and remembers them so an unchanged one
+  costs only a `stat` on later scans. Rows recorded by an earlier version stay
+  in the library. See
+  [file types](https://docs.videre.sh/reference/file-types/#file-type-detection).
+- **`videre scan` no longer reads every new file twice.** Looking for an
+  embedded XMP packet read the whole file into memory again after hashing it;
+  it now reads only the file's metadata, where a packet is stored. A folder of
+  61 videos (21 GB) spent 2.4 minutes on that second pass, and a large video
+  briefly cost about twice its size in memory. `faces` reads XMP the same way.
 - **The Linux binaries start on Debian 13 and Ubuntu 24.04 again.** 0.65.0's
   were built against glibc 2.43 and refused to run there ("version
   `GLIBC_2.43' not found"). They are built against glibc 2.39 again, and a
