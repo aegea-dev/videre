@@ -144,8 +144,12 @@ jobs:
       # a crate whose license about.toml does not accept.
       - name: Generate third-party license notices
         shell: bash
+        # cargo-about's binary sits behind its `cli` feature since 0.9.0.
+        # Without it `cargo install` builds only the library, warns, and
+        # still exits 0, so the check below fails here and not in make.
         run: |
-          cargo install --locked cargo-about@0.9.3
+          cargo install --locked cargo-about@0.9.3 --features cli
+          cargo about --version
           make licenses TARGET=${{ matrix.target }}
 
       - uses: taiki-e/upload-rust-binary-action@f0d45ae91ee7b8ee928de7a9d04d893a08bcbec6 # v1.30.2
