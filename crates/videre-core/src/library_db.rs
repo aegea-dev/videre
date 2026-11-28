@@ -32,11 +32,12 @@
 
 use crate::io_timeout::STAT_TIMEOUT;
 use crate::library::{bounded_op, root_cause_is_not_found, LibraryContext};
-use crate::library_locks::ActivityMode;
+use crate::library_locks::{ActivityGuard, ActivityMode, InitGuard};
 use anyhow::{bail, Context, Result};
 use rusqlite::Connection;
 use std::path::{Component, Path};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 /// Schema 3 introduced the metadata-independent content key. Version 4 makes
@@ -856,21 +857,98 @@ fn sweep_stale_builds(ctx: &LibraryContext) {
 /// Publish one completed database build into its final path.
 ///
 /// Kept as one operation so the no-overwrite contract can be tested at the
-/// same boundary initialization uses.
-fn publish_database(from: &Path, to: &Path) -> Result<()> {
+/// same boundary initialization uses. On filesystems without NOREPLACE
+/// (notably exFAT on macOS), reserve the destination exclusively before
+/// replacing that reservation. The initialization locks serialize other
+/// cooperating videre processes. The reservation and rename are separate
+/// operations: another program ignoring those locks could replace or modify
+/// the reservation before rename, and its data could be overwritten. Unlike
+/// native NOREPLACE, the fallback cannot atomically protect against such writes.
+fn publish_database(from: &Path, to: &Path, locks: Arc<InitializationLocks>) -> Result<()> {
+    publish_database_with_renames(
+        from,
+        to,
+        locks,
+        STAT_TIMEOUT,
+        |from, to| {
+            rustix::fs::renameat_with(
+                rustix::fs::CWD,
+                from,
+                rustix::fs::CWD,
+                to,
+                rustix::fs::RenameFlags::NOREPLACE,
+            )
+        },
+        |from, to| std::fs::rename(from, to),
+    )
+}
+
+fn publish_database_with_renames<NoReplace, Rename>(
+    from: &Path,
+    to: &Path,
+    locks: Arc<InitializationLocks>,
+    budget: Duration,
+    no_replace: NoReplace,
+    rename: Rename,
+) -> Result<()>
+where
+    NoReplace: FnOnce(&Path, &Path) -> rustix::io::Result<()> + Send + 'static,
+    Rename: FnOnce(&Path, &Path) -> std::io::Result<()> + Send + 'static,
+{
     let rename_from = from.to_path_buf();
     let rename_to = to.to_path_buf();
-    bounded_op(to, "publish", STAT_TIMEOUT, move || {
-        rustix::fs::renameat_with(
-            rustix::fs::CWD,
-            &rename_from,
-            rustix::fs::CWD,
-            &rename_to,
-            rustix::fs::RenameFlags::NOREPLACE,
-        )
-        .map_err(Into::into)
+    bounded_op(to, "publish", budget, move || {
+        // bounded_op can return a timeout while this worker is still in a
+        // syscall. Keep both locks until the worker actually finishes, so
+        // a late fallback rename cannot overwrite a newer initialization.
+        let _locks = locks;
+        // Linux also reports unsupported NOREPLACE as EINVAL. The other
+        // EINVAL cases (invalid flags or moving a directory into itself)
+        // do not apply to this fixed flag and completed database file.
+        match no_replace(&rename_from, &rename_to) {
+            Ok(()) => Ok(()),
+            Err(error)
+                if [
+                    rustix::io::Errno::NOTSUP,
+                    rustix::io::Errno::OPNOTSUPP,
+                    rustix::io::Errno::NOSYS,
+                    #[cfg(target_os = "linux")]
+                    rustix::io::Errno::INVAL,
+                ]
+                .contains(&error) =>
+            {
+                // create_new refuses existing files, directories and even
+                // dangling symlinks atomically. Keep the reservation open
+                // through rename. A failure leaves an empty database, which
+                // initialize already knows how to recover, and the complete
+                // temporary build for the next initialization to sweep.
+                let _reservation = std::fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(&rename_to)?;
+                rename(&rename_from, &rename_to)
+            }
+            Err(error) => Err(error.into()),
+        }
     })
     .with_context(|| format!("publish {}", to.display()))
+}
+
+struct InitializationLocks {
+    // Fields drop in declaration order: release init before activity.
+    _init: InitGuard,
+    _activity: ActivityGuard,
+}
+
+fn initialization_locks(ctx: &LibraryContext) -> Result<Arc<InitializationLocks>> {
+    crate::library_locks::ensure_state_and_locks(ctx)?;
+    let activity = crate::library_locks::try_activity(ctx, ActivityMode::Exclusive)
+        .with_context(|| format!("initialize {}", ctx.paths.root.display()))?;
+    let init = crate::library_locks::try_init(ctx)?;
+    Ok(Arc::new(InitializationLocks {
+        _init: init,
+        _activity: activity,
+    }))
 }
 
 /// Build a fresh database in a unique state-local temporary file, close it
@@ -881,7 +959,7 @@ fn publish_database(from: &Path, to: &Path) -> Result<()> {
 /// interleave with. On failure the temporary is deliberately left in place:
 /// removing it would touch the volume that just failed, and the next
 /// successful initialization sweeps it.
-fn publish_fresh(ctx: &LibraryContext) -> Result<Connection> {
+fn publish_fresh(ctx: &LibraryContext, locks: Arc<InitializationLocks>) -> Result<Connection> {
     sweep_stale_builds(ctx);
     let tmp = ctx.paths.state.join(format!(
         "hashes.db.{}.{}.tmp",
@@ -932,7 +1010,7 @@ fn publish_fresh(ctx: &LibraryContext) -> Result<Connection> {
         "a database appeared at {} while the library was being initialized",
         ctx.paths.db.display()
     );
-    publish_database(&tmp, &ctx.paths.db)?;
+    publish_database(&tmp, &ctx.paths.db, locks)?;
     sync_dir(&ctx.paths.state)?;
     let conn = open_existing_conn(ctx)?;
     open_prepared(ctx, &conn)?;
@@ -950,22 +1028,19 @@ fn publish_fresh(ctx: &LibraryContext) -> Result<Connection> {
 /// fresh library, and only when no config exists, so a repeated initialize
 /// never rewrites what a user or a previous run wrote.
 pub fn initialize(ctx: &LibraryContext) -> Result<Connection> {
-    crate::library_locks::ensure_state_and_locks(ctx)?;
-    let _activity = crate::library_locks::try_activity(ctx, ActivityMode::Exclusive)
-        .with_context(|| format!("initialize {}", ctx.paths.root.display()))?;
-    let _init = crate::library_locks::try_init(ctx)?;
+    let locks = initialization_locks(ctx)?;
     // Identity rechecked under the locks: the root or its .videre may have
     // been replaced while the directories were being created.
     crate::library_locks::verify_state(ctx)?;
     crate::library_locks::reject_redirect(&ctx.paths.config, "the library config")?;
     crate::library_locks::reject_dir_redirect(&ctx.paths.embeddings, "the embeddings directory")?;
     let conn = match inspect_db_file(ctx)? {
-        DbFile::Absent => publish_fresh(ctx)?,
+        DbFile::Absent => publish_fresh(ctx, Arc::clone(&locks))?,
         DbFile::ZeroByte => {
             // Provably empty, so replacing it cannot lose anything, and a
             // zero-byte file must never be exposed as a library.
             remove_file_bounded(&ctx.paths.db, "the empty database")?;
-            publish_fresh(ctx)?
+            publish_fresh(ctx, Arc::clone(&locks))?
         }
         DbFile::Present => {
             let conn = open_existing_conn(ctx)?;
@@ -1718,17 +1793,240 @@ mod tests {
 
     #[test]
     fn fresh_database_publication_never_replaces_an_existing_destination() {
-        let temp = tempfile::tempdir().unwrap();
-        let built = temp.path().join("built.db");
-        let destination = temp.path().join("hashes.db");
+        let (_temp, ctx) = library();
+        let locks = initialization_locks(&ctx).unwrap();
+        let built = ctx.paths.state.join("built.db");
+        let destination = ctx.paths.db.clone();
         std::fs::write(&built, b"completed build").unwrap();
         std::fs::write(&destination, b"newer initializer").unwrap();
 
-        let err = publish_database(&built, &destination).unwrap_err();
+        let err = publish_database(&built, &destination, locks).unwrap_err();
 
         assert!(format!("{err:#}").contains("publish"), "{err:#}");
         assert_eq!(std::fs::read(&destination).unwrap(), b"newer initializer");
         assert!(built.exists(), "the refused build remains recoverable");
+    }
+
+    #[test]
+    fn publication_selects_rename_strategy_from_the_native_result() {
+        use rustix::io::Errno;
+        use std::sync::atomic::AtomicBool;
+
+        #[derive(Clone, Copy)]
+        enum Expected {
+            NoReplace,
+            Fallback,
+            Failure,
+        }
+
+        // NOTSUP and OPNOTSUPP differ on macOS (45 and 102), even though
+        // they are aliases on Linux. Both must take the portable path.
+        let cases = [
+            ("native success", None, Expected::NoReplace),
+            ("NOTSUP", Some(Errno::NOTSUP), Expected::Fallback),
+            ("OPNOTSUPP", Some(Errno::OPNOTSUPP), Expected::Fallback),
+            ("NOSYS", Some(Errno::NOSYS), Expected::Fallback),
+            (
+                "INVAL",
+                Some(Errno::INVAL),
+                if cfg!(target_os = "linux") {
+                    Expected::Fallback
+                } else {
+                    Expected::Failure
+                },
+            ),
+            ("ACCESS", Some(Errno::ACCESS), Expected::Failure),
+        ];
+        for (name, error, expected) in cases {
+            let (_temp, ctx) = library();
+            let locks = initialization_locks(&ctx).unwrap();
+            let built = ctx.paths.state.join("tamamlandı.db");
+            let destination = ctx.paths.db.clone();
+            std::fs::write(&built, b"completed build").unwrap();
+            let fallback_called = Arc::new(AtomicBool::new(false));
+            let called = Arc::clone(&fallback_called);
+
+            let result = publish_database_with_renames(
+                &built,
+                &destination,
+                locks,
+                STAT_TIMEOUT,
+                move |from, to| match error {
+                    Some(error) => Err(error),
+                    None => {
+                        std::fs::rename(from, to).unwrap();
+                        Ok(())
+                    }
+                },
+                move |from, to| {
+                    called.store(true, Ordering::Relaxed);
+                    std::fs::rename(from, to)
+                },
+            );
+
+            assert_eq!(
+                fallback_called.load(Ordering::Relaxed),
+                matches!(expected, Expected::Fallback),
+                "{name}"
+            );
+            match expected {
+                Expected::NoReplace | Expected::Fallback => {
+                    assert!(result.is_ok(), "{name}: {result:?}");
+                    assert_eq!(std::fs::read(&destination).unwrap(), b"completed build");
+                    assert!(!built.exists());
+                }
+                Expected::Failure => {
+                    let failure = result.unwrap_err();
+                    assert_eq!(
+                        failure
+                            .downcast_ref::<std::io::Error>()
+                            .unwrap()
+                            .raw_os_error(),
+                        Some(error.unwrap().raw_os_error()),
+                        "{name}"
+                    );
+                    assert!(!destination.exists());
+                    assert_eq!(std::fs::read(&built).unwrap(), b"completed build");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn publication_fallback_refuses_existing_files_directories_and_symlinks() {
+        // An unsupported native operation must not let the fallback replace
+        // an occupied destination, regardless of what already lives there.
+        for kind in ["file", "directory", "symlink"] {
+            let (_temp, ctx) = library();
+            let locks = initialization_locks(&ctx).unwrap();
+            let built = ctx.paths.state.join("tamamlandı.db");
+            let destination = ctx.paths.db.clone();
+            let outside = ctx.paths.root.join("olmayan.db");
+            std::fs::write(&built, b"completed build").unwrap();
+            match kind {
+                "file" => std::fs::write(&destination, b"existing database").unwrap(),
+                "directory" => std::fs::create_dir(&destination).unwrap(),
+                "symlink" => std::os::unix::fs::symlink(&outside, &destination).unwrap(),
+                _ => unreachable!(),
+            }
+
+            let error = publish_database_with_renames(
+                &built,
+                &destination,
+                locks,
+                STAT_TIMEOUT,
+                |_, _| Err(rustix::io::Errno::NOTSUP),
+                |_, _| panic!("an existing destination must never reach rename"),
+            )
+            .unwrap_err();
+
+            assert_eq!(
+                error.downcast_ref::<std::io::Error>().unwrap().kind(),
+                std::io::ErrorKind::AlreadyExists,
+                "{kind}: {error:#}"
+            );
+            assert_eq!(std::fs::read(&built).unwrap(), b"completed build");
+            match kind {
+                "file" => {
+                    assert_eq!(std::fs::read(&destination).unwrap(), b"existing database");
+                }
+                "directory" => assert!(destination.is_dir()),
+                "symlink" => assert_eq!(std::fs::read_link(&destination).unwrap(), outside),
+                _ => unreachable!(),
+            }
+        }
+    }
+
+    #[test]
+    fn failed_publication_fallback_leaves_a_recoverable_empty_reservation() {
+        let (_temp, ctx) = library();
+        let locks = initialization_locks(&ctx).unwrap();
+        let built = ctx.paths.state.join("hashes.db.interrupted.tmp");
+        std::fs::write(&built, b"completed build").unwrap();
+
+        let error = publish_database_with_renames(
+            &built,
+            &ctx.paths.db,
+            locks,
+            STAT_TIMEOUT,
+            |_, _| Err(rustix::io::Errno::NOTSUP),
+            |_, _| Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied)),
+        )
+        .unwrap_err();
+
+        assert_eq!(
+            error.downcast_ref::<std::io::Error>().unwrap().kind(),
+            std::io::ErrorKind::PermissionDenied
+        );
+        assert_eq!(std::fs::read(&ctx.paths.db).unwrap(), b"");
+        assert_eq!(std::fs::read(&built).unwrap(), b"completed build");
+
+        let conn = initialize(&ctx).unwrap();
+        assert_eq!(user_version(&conn).unwrap(), SCHEMA_VERSION);
+        assert!(
+            !built.exists(),
+            "the next initialization sweeps the stale build"
+        );
+    }
+
+    #[test]
+    fn timed_out_publication_keeps_initialization_locked_until_the_worker_finishes() {
+        let (_temp, ctx) = library();
+        let locks = initialization_locks(&ctx).unwrap();
+        let built = ctx.paths.state.join("tamamlandı.db");
+        std::fs::write(&built, b"completed build").unwrap();
+        let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let (finished_tx, finished_rx) = std::sync::mpsc::channel();
+
+        let error = publish_database_with_renames(
+            &built,
+            &ctx.paths.db,
+            locks,
+            Duration::from_millis(25),
+            |_, _| Err(rustix::io::Errno::NOTSUP),
+            move |from, to| {
+                entered_tx.send(()).unwrap();
+                release_rx.recv().unwrap();
+                let result = std::fs::rename(from, to);
+                finished_tx.send(()).unwrap();
+                result
+            },
+        )
+        .unwrap_err();
+        entered_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        let activity_busy =
+            crate::library_locks::try_activity(&ctx, ActivityMode::Exclusive).is_err();
+        let init_busy = crate::library_locks::try_init(&ctx).is_err();
+        let empty_reservation = std::fs::read(&ctx.paths.db).unwrap().is_empty();
+
+        release_tx.send(()).unwrap();
+        finished_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        // Completion is sent inside rename, just before the worker drops
+        // its locks. Wait for that drop, not for an arbitrary sleep.
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        loop {
+            if let Ok(_activity) = crate::library_locks::try_activity(&ctx, ActivityMode::Exclusive)
+            {
+                let _init = crate::library_locks::try_init(&ctx).unwrap();
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "worker kept its locks"
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
+
+        assert!(format!("{error:#}").contains("did not respond"));
+        assert!(empty_reservation);
+        assert!(
+            activity_busy,
+            "timed-out publication released the activity lock"
+        );
+        assert!(init_busy, "timed-out publication released the init lock");
+        assert_eq!(std::fs::read(&ctx.paths.db).unwrap(), b"completed build");
+        assert!(!built.exists());
     }
 
     #[test]

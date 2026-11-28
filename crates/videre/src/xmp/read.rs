@@ -5,7 +5,7 @@
 //! yields no marks rather than an error, so a malformed packet never fails a scan.
 
 use std::ffi::{OsStr, OsString};
-use std::io::Read;
+use std::io::{Read, Seek};
 use std::path::{Path, PathBuf};
 
 const XMP_NS: &str = "http://ns.adobe.com/xap/1.0/";
@@ -165,8 +165,7 @@ pub fn read_data_in(ctx: &videre_core::library::LibraryContext, path: &Path) -> 
         .and_then(|bytes| String::from_utf8(bytes).ok())
         .map(|doc| parse_xmp_data(&doc))
         .unwrap_or_default();
-    let embedded = read_confined(ctx, path)
-        .and_then(|bytes| embedded_packet_bytes(&bytes))
+    let embedded = embedded_packet_in(ctx, path)
         .map(|doc| parse_xmp_data(&doc))
         .unwrap_or_default();
     merge_sources(sidecar, embedded)
@@ -243,6 +242,58 @@ fn read_confined(ctx: &videre_core::library::LibraryContext, path: &Path) -> Opt
     .ok()
 }
 
+/// The embedded XMP packet of the media at `path`, if it has one, read under
+/// the same confinement and size-scaled timeout as [`read_confined`].
+fn embedded_packet_in(ctx: &videre_core::library::LibraryContext, path: &Path) -> Option<String> {
+    let file = videre_core::library_io::open_media(ctx, path).ok()?;
+    let stat = file.try_clone().ok()?;
+    let len = videre_core::io_timeout::run_with_timeout(
+        videre_core::io_timeout::STAT_TIMEOUT,
+        move || stat.metadata().map(|metadata| metadata.len()),
+    )
+    .ok()?
+    .ok()?;
+    let budget = videre_core::io_timeout::timeout_for_size(
+        len,
+        videre_core::io_timeout::min_read_rate_mb_s(),
+    );
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+    videre_core::io_timeout::run_with_timeout(budget, move || {
+        embedded_packet_from(&mut std::io::BufReader::new(file), len, &ext)
+    })
+    .ok()?
+}
+
+/// The embedded XMP packet of a file of `len` bytes read through `reader`.
+///
+/// Searched for in the file's metadata alone (`content_key::metadata`, the
+/// spans the content key leaves out), which holds every place a packet is
+/// stored: JPEG APP1, PNG iTXt, WebP's `XMP ` chunk, TIFF tag 700, a HEIC's
+/// `mime` item, a movie's boxes other than `mdat`. Reading whole files made
+/// scan read each new video a second time, whole, into memory. A format
+/// `content_key` does not parse is still searched whole, as before.
+fn embedded_packet_from<R: Read + Seek>(reader: &mut R, len: u64, ext: &str) -> Option<String> {
+    let mut head = Vec::with_capacity(512);
+    (&mut *reader).take(512).read_to_end(&mut head).ok()?;
+    let sniffed = videre_core::mime_probe::sniff(&head);
+    let format = videre_core::mime_probe::effective_mime(sniffed, ext)
+        .and_then(videre::content_key::Format::for_mime);
+    let bytes = match videre::content_key::metadata(reader, len, format).ok()? {
+        Some(metadata) => metadata,
+        None => {
+            reader.seek(std::io::SeekFrom::Start(0)).ok()?;
+            let mut all = Vec::new();
+            reader.read_to_end(&mut all).ok()?;
+            all
+        }
+    };
+    embedded_packet_bytes(&bytes)
+}
+
 /// Extract the embedded XMP packet from a file's bytes, best-effort: find the
 /// `<x:xmpmeta ...> ... </x:xmpmeta>` span. Works across JPEG/HEIC/PNG because
 /// the packet is stored as UTF-8 text regardless of container.
@@ -256,6 +307,74 @@ fn embedded_packet_bytes(bytes: &[u8]) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Counts the bytes read through it.
+    struct Counting<R> {
+        inner: R,
+        read: std::rc::Rc<std::cell::Cell<u64>>,
+    }
+    impl<R: Read> Read for Counting<R> {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            let n = self.inner.read(buf)?;
+            self.read.set(self.read.get() + n as u64);
+            Ok(n)
+        }
+    }
+    impl<R: Seek> Seek for Counting<R> {
+        fn seek(&mut self, pos: std::io::SeekFrom) -> std::io::Result<u64> {
+            self.inner.seek(pos)
+        }
+    }
+
+    fn mp4_box(kind: &[u8; 4], payload: &[u8]) -> Vec<u8> {
+        let mut out = ((payload.len() + 8) as u32).to_be_bytes().to_vec();
+        out.extend_from_slice(kind);
+        out.extend_from_slice(payload);
+        out
+    }
+
+    /// A video's embedded XMP is read from its metadata boxes alone: the
+    /// packet is found without reading the media samples, which made scan
+    /// read every new video twice, whole, into memory.
+    #[test]
+    fn a_video_packet_is_read_without_its_media_samples() {
+        let packet = r#"<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><rdf:Description xmlns:xmp="http://ns.adobe.com/xap/1.0/" xmp:Rating="4"/></rdf:RDF></x:xmpmeta>"#;
+        let mut uuid = vec![
+            0xBE, 0x7A, 0xCF, 0xCB, 0x97, 0xA9, 0x42, 0xE8, 0x9C, 0x71, 0x99, 0x94, 0x91, 0xE3,
+            0xAF, 0xAC,
+        ];
+        uuid.extend_from_slice(packet.as_bytes());
+        let mut file = mp4_box(b"ftyp", b"qt  \0\0\0\0qt  ");
+        file.extend(mp4_box(b"uuid", &uuid));
+        file.extend(mp4_box(b"mdat", &vec![0u8; 8 << 20]));
+        let len = file.len() as u64;
+        let read = std::rc::Rc::new(std::cell::Cell::new(0));
+        let mut reader = Counting {
+            inner: std::io::Cursor::new(file),
+            read: read.clone(),
+        };
+
+        let found = embedded_packet_from(&mut reader, len, "mov").expect("the packet");
+
+        assert_eq!(parse_xmp_data(&found).rating, Some(4));
+        assert!(
+            read.get() < 1 << 20,
+            "read {} bytes of an 8 MB video",
+            read.get()
+        );
+    }
+
+    /// A file `content_key` does not parse is still searched whole, as every
+    /// file was before, so no packet videre used to find is lost.
+    #[test]
+    fn an_unparsed_format_is_still_searched_whole() {
+        let mut file = b"not a known container ".to_vec();
+        file.extend_from_slice(br#"<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><rdf:Description xmlns:xmp="http://ns.adobe.com/xap/1.0/" xmp:Rating="2"/></rdf:RDF></x:xmpmeta>"#);
+        let len = file.len() as u64;
+        let found = embedded_packet_from(&mut std::io::Cursor::new(file), len, "dosya")
+            .expect("the packet");
+        assert_eq!(parse_xmp_data(&found).rating, Some(2));
+    }
 
     #[test]
     fn reads_a_region_from_the_real_exiftool_fixture() {
