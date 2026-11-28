@@ -30,9 +30,23 @@ pub struct RowSig {
 /// but cannot stat, or a row with no stored mtime, is never current.
 pub fn is_current(sig: &RowSig, cur_size: u64, cur_mtime: Option<&str>) -> bool {
     sig.has_mime
-        && sig.size_bytes == cur_size
-        && cur_mtime.is_some()
-        && sig.modified_at.as_deref() == cur_mtime
+        && is_unchanged(
+            sig.size_bytes,
+            sig.modified_at.as_deref(),
+            cur_size,
+            cur_mtime,
+        )
+}
+
+/// Shared stamp comparison for indexed media and cached content exclusions.
+/// Missing modification times never establish that a file is unchanged.
+pub fn is_unchanged(
+    stored_size: u64,
+    stored_mtime: Option<&str>,
+    cur_size: u64,
+    cur_mtime: Option<&str>,
+) -> bool {
+    stored_size == cur_size && cur_mtime.is_some() && stored_mtime == cur_mtime
 }
 
 /// Load every row's signature in one query, keyed by path. Empty when the

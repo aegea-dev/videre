@@ -13,6 +13,7 @@
 /// The seeded two-library fixture and logical snapshot helpers, shared by the
 /// directory-local command tests.
 pub mod feature_fixture;
+pub mod files;
 
 pub mod model_test_support {
     include!(concat!(
