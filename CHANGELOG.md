@@ -16,6 +16,54 @@ version number and are released together.
 ## [Unreleased]
 
 
+## [0.65.1] - 2026-11-28
+
+### Fixed
+
+- **Libraries on exFAT drives.** Creating a library on a volume that cannot
+  rename without replacing, such as an exFAT drive on macOS, failed with
+  "Operation not supported (os error 45)", so `videre scan` could not start
+  there. videre now reserves the database name first and renames the finished
+  build over it; Linux filesystems that report the same limit as `EINVAL` are
+  handled too. See [platform support](https://docs.videre.sh/reference/platforms/).
+- **AppleDouble files are no longer indexed.** macOS writes a `._photo.jpg`
+  metadata file beside every original on volumes such as exFAT, and `scan` and
+  `watch` recorded them as photos: they showed up in counts, waited for `embed`
+  and `faces`, and `dedupe` offered them as copies to remove. videre now
+  recognises them by their contents, not their name, so a real photo named
+  `._something.jpg` is still scanned, and remembers them so an unchanged one
+  costs only a `stat` on later scans. Rows recorded by an earlier version stay
+  in the library. See
+  [file types](https://docs.videre.sh/reference/file-types/#file-type-detection).
+- **`videre scan` no longer reads every new file twice.** Looking for an
+  embedded XMP packet read the whole file into memory again after hashing it;
+  it now reads only the file's metadata, where a packet is stored. A folder of
+  61 videos (21 GB) spent 2.4 minutes on that second pass, and a large video
+  briefly cost about twice its size in memory. `faces` reads XMP the same way.
+- **The Linux binaries start on Debian 13 and Ubuntu 24.04 again.** 0.65.0's
+  were built against glibc 2.43 and refused to run there ("version
+  `GLIBC_2.43' not found"). They are built against glibc 2.39 again, and a
+  release now fails if a binary asks for anything newer. Debian 12 and
+  Ubuntu 22.04 remain unsupported.
+- **Files indexed by `videre watch` and put back by `videre dedupe undo` stay
+  inside the library.** They are now opened through the library root, as
+  `scan` already did. A symlink pointing outside the library is skipped
+  without stopping the other files in the same batch, and a library root
+  replaced while indexing runs can no longer feed another folder's files into
+  the database.
+
+### Added
+
+- **Third-party license notices.** Every release archive now includes
+  `THIRD_PARTY_LICENSES.md`, with the license texts of the Rust crates, ONNX
+  Runtime, SQLite and GeoNames data that videre is built from, and the docs
+  have a [Credits](https://docs.videre.sh/reference/credits/) page.
+
+### Changed
+
+- `url` 2.5.9 and `cookie` 0.18.3 in the release binaries, fixing two security
+  advisories (RUSTSEC-2026-0592 and RUSTSEC-2026-0594).
+
 ## [0.65.0] - 2026-11-19
 
 ### Added
@@ -3553,7 +3601,8 @@ takes the model id explicitly instead of reading it from the environment.
   skip it rather than failing.
 - First release published to crates.io.
 
-[Unreleased]: https://github.com/aegea-dev/videre/compare/v0.65.0...HEAD
+[Unreleased]: https://github.com/aegea-dev/videre/compare/v0.65.1...HEAD
+[0.65.1]: https://github.com/aegea-dev/videre/compare/v0.65.0...v0.65.1
 [0.65.0]: https://github.com/aegea-dev/videre/compare/v0.64.4...v0.65.0
 [0.64.4]: https://github.com/aegea-dev/videre/compare/v0.64.3...v0.64.4
 [0.64.3]: https://github.com/aegea-dev/videre/compare/v0.64.2...v0.64.3
