@@ -18,6 +18,7 @@ pub mod geocode;
 pub mod heic;
 pub(crate) mod held_lock;
 pub mod hf_cache;
+pub mod ignored_files;
 pub mod image_decode;
 pub mod import_location;
 pub mod import_providers;

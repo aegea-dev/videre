@@ -15,12 +15,24 @@ pub fn write_records_in(
     ctx: &videre_core::library::LibraryContext,
     records: &[FileRecord],
 ) -> anyhow::Result<()> {
+    write_scan_in(conn, ctx, records, &[])
+}
+
+/// Persist media and content exclusions atomically. A path now recognized as
+/// media loses its old exclusion in the same transaction as its media row.
+pub fn write_scan_in(
+    conn: &rusqlite::Connection,
+    ctx: &videre_core::library::LibraryContext,
+    records: &[FileRecord],
+    ignored: &[videre_core::ignored_files::IgnoredFile],
+) -> anyhow::Result<()> {
     let paths: Vec<PathBuf> = records
         .iter()
         .map(|record| PathBuf::from(&record.path))
+        .chain(ignored.iter().map(|entry| PathBuf::from(&entry.path)))
         .collect();
     videre_core::library_guard::validate_paths(ctx, &paths)?;
-    write_records_to(conn, records)?;
+    write_scan_to(conn, records, ignored)?;
     Ok(())
 }
 
@@ -236,7 +248,16 @@ pub fn orient_unoriented(conn: &rusqlite::Connection) -> anyhow::Result<usize> {
     Ok(sized.len())
 }
 
+#[cfg(test)]
 fn write_records_to(conn: &rusqlite::Connection, records: &[FileRecord]) -> Result<()> {
+    write_scan_to(conn, records, &[])
+}
+
+fn write_scan_to(
+    conn: &rusqlite::Connection,
+    records: &[FileRecord],
+    ignored: &[videre_core::ignored_files::IgnoredFile],
+) -> Result<()> {
     videre_core::library_db::ensure_scan_schema(conn)?;
     // Only a record the file itself leaves short of a date or a place needs
     // its sidecar.
@@ -309,6 +330,8 @@ fn write_records_to(conn: &rusqlite::Connection, records: &[FileRecord]) -> Resu
         }
     }
 
+    videre_core::ignored_files::write(&tx, ignored)?;
+    videre_core::ignored_files::forget(&tx, records.iter().map(|record| record.path.as_str()))?;
     tx.commit()?;
     Ok(())
 }
@@ -389,6 +412,30 @@ mod tests {
             date_source: None,
             mvhd_unix: None,
         }
+    }
+
+    #[test]
+    fn a_failed_cache_clear_rolls_back_the_media_write() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        videre_core::library_db::ensure_scan_schema(&conn).unwrap();
+        conn.execute_batch(
+            "INSERT INTO ignored_files(path, size_bytes, modified_at, reason)
+             VALUES ('/çiçek.jpg', 10, '2021-01-01T00:00:00+00:00', 'appledouble');
+             CREATE TRIGGER refuse_cache_clear BEFORE DELETE ON ignored_files
+             BEGIN SELECT RAISE(ABORT, 'cache clear failed'); END;",
+        )
+        .unwrap();
+
+        assert!(write_records_to(&conn, &[rec("/çiçek.jpg", "hash")]).is_err());
+
+        let count: i64 = conn
+            .query_row("SELECT count(*) FROM file_hashes", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 0);
+        let count: i64 = conn
+            .query_row("SELECT count(*) FROM ignored_files", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 1);
     }
 
     #[test]
